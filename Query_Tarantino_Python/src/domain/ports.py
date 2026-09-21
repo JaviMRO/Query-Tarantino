@@ -45,3 +45,12 @@ class BookDownloader(Protocol):
     START/END. Implementacion concreta: HTTP.
     """
     ...  # TODO: definir metodos (download, etc.)
+
+
+class ControlStateStore(Protocol):
+    """
+    TODO: Puerto que define como se persiste el estado del pipeline de
+    control (ultimo libro procesado, libros descargados/indexados, etc.)
+    para poder reanudar. Implementacion concreta: fichero.
+    """
+    ...  # TODO: definir metodos (load, save, mark_downloaded, etc.)

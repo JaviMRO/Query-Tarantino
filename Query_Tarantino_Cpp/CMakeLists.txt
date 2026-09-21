@@ -11,12 +11,15 @@ find_package(bsoncxx REQUIRED)
 find_package(CURL REQUIRED)
 
 add_executable(stage1
+    src/domain/tokenizer.cpp
+    src/domain/header_parser.cpp
     src/application/control_pipeline.cpp
     src/application/ingest_book_use_case.cpp
     src/infrastructure/datalake/time_based_adapter.cpp
     src/infrastructure/datalake/book_based_adapter.cpp
     src/infrastructure/datalake/batch_based_adapter.cpp
     src/infrastructure/metadata/sqlite_metadata_adapter.cpp
+    src/infrastructure/control/file_control_state_store.cpp
     src/infrastructure/index/monolithic_json_adapter.cpp
     src/infrastructure/index/mongodb_index_adapter.cpp
     src/infrastructure/index/hierarchical_folder_adapter.cpp

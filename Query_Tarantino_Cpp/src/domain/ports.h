@@ -39,3 +39,12 @@ public:
     virtual ~BookDownloader() = default;
     // TODO: declarar metodos virtuales puros (download, etc.)
 };
+
+// TODO: Puerto que define como se persiste el estado del pipeline de control
+// (ultimo libro procesado, libros descargados/indexados, etc.) para poder
+// reanudar. Implementacion concreta: fichero.
+class ControlStateStore {
+public:
+    virtual ~ControlStateStore() = default;
+    // TODO: declarar metodos virtuales puros (load, save, markDownloaded, etc.)
+};

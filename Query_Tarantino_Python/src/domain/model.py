@@ -16,3 +16,13 @@ class Book:
 @dataclass
 class PostingList:
     pass  # TODO: definir campos (term, postings, etc.)
+
+
+@dataclass
+class RawBook:
+    pass  # TODO: definir campos (id, header, body, etc.)
+
+
+@dataclass
+class BookLocation:
+    pass  # TODO: definir campos (book_id, path, etc.)
