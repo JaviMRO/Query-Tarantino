@@ -1,6 +1,6 @@
 # src/domain/ports.py
 from typing import Protocol, Tuple, Set, Dict, List
-from src.domain.model import Book  # Assuming Book is defined in model.py
+from ..domain.model import Book  # Assuming Book is defined in model.py
 
 class DatalakeStorage(Protocol):
     """

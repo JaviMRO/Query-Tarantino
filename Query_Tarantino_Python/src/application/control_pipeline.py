@@ -1,5 +1,5 @@
 from typing import Dict, Any, Optional
-from src.domain.ports import ControlStateStore
+from ..domain.ports import ControlStateStore
 
 
 class ControlPipeline:

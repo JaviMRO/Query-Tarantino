@@ -1,7 +1,7 @@
 from typing import Dict, Any, Protocol
 from datetime import datetime, timezone
-from src.domain.ports import DatalakeStorage, MetadataStorage, InvertedIndexStorage, ControlStateStore
-from src.domain.model import Book
+from ..domain.ports import DatalakeStorage, MetadataStorage, InvertedIndexStorage, ControlStateStore
+from ..domain.model import Book
 
 
 class HeaderParser(Protocol):

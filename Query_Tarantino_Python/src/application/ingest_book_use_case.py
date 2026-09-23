@@ -1,6 +1,6 @@
 from typing import Dict, Any
-from src.domain.ports import BookDownloader, DatalakeStorage, ControlStateStore
-from src.domain.model import DownloadException
+from ..domain.ports import BookDownloader, DatalakeStorage, ControlStateStore
+from ..domain.model import DownloadException
 
 class IngestBookUseCase:
     def __init__(
