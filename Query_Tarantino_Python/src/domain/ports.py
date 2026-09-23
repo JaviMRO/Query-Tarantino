@@ -1,56 +1,86 @@
-"""
-TODO: Ports (interfaces) del dominio, definidos con typing.Protocol. No deben
-depender de ninguna libreria externa (SQLite, MongoDB, JSON, HTTP son detalle
-de infrastructure).
-"""
-
-from typing import Protocol
-
-from src.domain.model import Book, PostingList
-
+# src/domain/ports.py
+from typing import Protocol, Tuple, Set, Dict, List
+from src.domain.model import Book  # Assuming Book is defined in model.py
 
 class DatalakeStorage(Protocol):
     """
-    TODO: Puerto que define como se persiste el contenido crudo de un libro
-    en el datalake. Implementaciones concretas: organizacion por fecha/hora
-    de descarga (time-based), por id de libro (book-based) o por
-    lotes/rango/hash (batch-based).
+    Port defining how a book's raw content is persisted in the datalake.
+    Implementations: time-based, book-based, or batch-based.
     """
-    ...  # TODO: definir metodos (save, load, exists, etc.)
+    def save(self, book_id: int, header_text: str, body_text: str) -> Tuple[str, str]:
+        """
+        Stores header and body using safe writes.
+        Returns: (header_path, body_path) relative to TARANTINO_DATA_DIR using '/' as separator.
+        """
+        ...
+
+    def load(self, book_id: int) -> Tuple[str, str]:
+        """
+        Reads a book from the datalake.
+        Returns: (header_text, body_text).
+        """
+        ...
 
 
 class MetadataStorage(Protocol):
     """
-    TODO: Puerto que define como se persiste y consulta la metadata (title,
-    author, language) extraida del header de un libro. Implementacion
-    concreta: SQLite.
+    Port defining how metadata extracted from a book's header is persisted.
+    Implementation: SQLite.
     """
-    ...  # TODO: definir metodos (save, find_by_id, list_indexed, etc.)
+    def save(self, book: Book, header_path: str, body_path: str) -> None:
+        """Saves a book to the database with indexed_at as NULL."""
+        ...
+
+    def update_indexed_at(self, book_id: int, timestamp: str) -> None:
+        """Updates the indexed_at UTC timestamp after successful indexing."""
+        ...
 
 
 class InvertedIndexStorage(Protocol):
     """
-    TODO: Puerto que define como se persiste el indice invertido.
-    Implementaciones concretas: un unico JSON monolitico con todos los
-    terminos, una coleccion MongoDB con un documento por termino, o una
-    carpeta con un .txt por termino agrupado alfabeticamente.
+    Port defining how the inverted index is persisted.
+    Implementations: monolithic JSON, MongoDB collection, or A-Z folders.
     """
-    ...  # TODO: definir metodos (add_posting, get_posting_list, etc.)
+    def write_book_terms(self, book_id: int, terms: Dict[str, int]) -> None:
+        """Writes or appends the terms of a single book to the index."""
+        ...
 
 
 class BookDownloader(Protocol):
     """
-    TODO: Puerto que define como se descarga el .txt de un libro desde
-    Project Gutenberg y se separa header/body usando los marcadores
-    START/END. Implementacion concreta: HTTP.
+    Port defining how to download a book's .txt from Project Gutenberg
+    and split header/body using START/END markers.
+    Implementations: HTTP or Local.
     """
-    ...  # TODO: definir metodos (download, etc.)
+    def download(self, book_id: int) -> Tuple[str, str]:
+        """
+        Downloads and splits the text.
+        Returns: (header_text, body_text).
+        Raises: DownloadException on HTTP_ERROR, NO_MARKERS, or EMPTY_BODY.
+        """
+        ...
 
 
 class ControlStateStore(Protocol):
     """
-    TODO: Puerto que define como se persiste el estado del pipeline de
-    control (ultimo libro procesado, libros descargados/indexados, etc.)
-    para poder reanudar. Implementacion concreta: fichero.
+    Port defining how to persist the control pipeline state.
+    Implementation: text files in the control/ directory.
     """
-    ...  # TODO: definir metodos (load, save, mark_downloaded, etc.)
+    def record_download(self, book_id: int) -> None:
+        ...
+
+    def record_indexing(self, book_id: int) -> None:
+        ...
+
+    def record_failure(self, book_id: int, reason: str) -> None:
+        ...
+
+    def get_downloaded_books(self) -> Set[int]:
+        ...
+
+    def get_indexed_books(self) -> Set[int]:
+        ...
+
+    def get_failure_counts(self) -> Dict[int, int]:
+        """Returns a dict mapping book_id to its total number of failed attempts."""
+        ...
