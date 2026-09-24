@@ -1,7 +1,7 @@
 # SPEC · Shared rules for Stage 1
 
 **Project:** Query Tarantino · Big Data, ULPGC
-**Version:** 1.1 · 2026-09-24
+**Version:** 1.2 · 2026-09-24
 **Scope:** the three Stage 1 modules (`Query_Tarantino_Java`, `Query_Tarantino_Python`, `Query_Tarantino_Cpp`) and, from phase 2 onwards, the Java version.
 
 This document defines **what** each module must do, precisely enough for all three to produce exactly the same results. It does not say **how** to implement it: each language uses its own tools as long as it follows these rules.
@@ -364,9 +364,10 @@ Rules:
 
 1. **Pending indexing** = IDs in `downloaded_books.txt` that are not in `indexed_books.txt`.
 2. If there are any, the **lowest** one is taken, indexed (section 8.2) and appended to `indexed_books.txt`. End of step.
-3. If there are none, a new book to download is searched for, with at most 10 candidates per step:
-   - **With `--ids FILE`** (the benchmark case): the next ID in that file, in its order, that has not been downloaded and does not have 3 failures.
-   - **Without a list:** a random ID between 1 and 75,000 that has not been downloaded and does not have 3 failures.
+3. If there are none, a new book to download is searched for. A candidate is **valid** if it has not been downloaded and has fewer than 3 failures.
+   - **With `--ids FILE`** (the benchmark case): the whole file is traversed in its order and the first valid ID is taken. There is no limit on how many IDs are checked.
+   - **Without a list:** exactly 10 random IDs between 1 and 75,000 (both included) are drawn, and the first valid one, in the order they were drawn, is taken. The limit of 10 only applies here, so a step can never loop forever when most IDs are already downloaded.
+   - If no candidate is valid, the step ends without downloading anything.
 4. The book is downloaded (section 3) and stored (section 4). On success, it is appended to `downloaded_books.txt`. On failure, a line is appended to `failed_books.txt`. End of step.
 
 ### 8.2 Indexing a book
@@ -689,3 +690,4 @@ Expected reading: `{1: 1, 2: 1}`. The third line replaces the first one and the 
 |---|---|---|
 | 1.0 | 2026-09-21 | Initial version |
 | 1.1 | 2026-09-24 | `sample_data/` renamed to `sample_dataset/` and listed in section 1. `stopwords_en.txt` 1.0 defined as the NLTK English list keeping only `a-z` entries (153 words) |
+| 1.2 | 2026-09-24 | Section 8.1 step 3: the limit of 10 candidates applies only to random IDs; with `--ids` the whole file is traversed; a step with no valid candidate downloads nothing |

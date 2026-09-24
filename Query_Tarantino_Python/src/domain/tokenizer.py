@@ -9,15 +9,21 @@ from src.domain.model import TermOccurrences
 
 MIN_TERM_LENGTH = 2
 
-# bytes.lower() only converts ASCII A-Z and [a-z]+ only matches ASCII letters,
-# so every other byte (digits, punctuation, non-ASCII) closes a term (SPEC 6.1).
-_TERM_PATTERN = re.compile(rb"[a-z]+")
+_ASCII_LETTER_RUN = re.compile(rb"[a-z]+")
 
 
 def tokenize(text: str, stopwords: frozenset[str]) -> dict[str, TermOccurrences]:
+    """
+    Works on the UTF-8 bytes: bytes.lower() only folds ASCII A-Z and
+    [a-z]+ only matches ASCII letters, so any other byte (digits,
+    punctuation, non-ASCII) closes a term. Every closed term takes a
+    position, including the ones discarded afterwards (SPEC 6.1).
+    """
     positions: dict[str, list[int]] = {}
-    for position, match in enumerate(_TERM_PATTERN.finditer(text.encode("utf-8").lower())):
+    for position, match in enumerate(_ASCII_LETTER_RUN.finditer(text.encode("utf-8").lower())):
         term = match.group().decode("ascii")
         if len(term) >= MIN_TERM_LENGTH and term not in stopwords:
             positions.setdefault(term, []).append(position)
-    return {term: TermOccurrences(len(found), tuple(found)) for term, found in positions.items()}
+    return {
+        term: TermOccurrences(len(term_positions), tuple(term_positions)) for term, term_positions in positions.items()
+    }

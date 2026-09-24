@@ -1,42 +1,43 @@
-from typing import Dict, Any
-from ..domain.ports import BookDownloader, DatalakeStorage, ControlStateStore
-from ..domain.model import DownloadException
+from dataclasses import dataclass
+
+from src.domain.model import DownloadException, FailureReason, StoredPaths
+from src.domain.ports import BookDownloader, ControlStateStore, DatalakeStorage
+
+
+@dataclass(frozen=True, slots=True)
+class BookDownloaded:
+    book_id: int
+    paths: StoredPaths
+
+
+@dataclass(frozen=True, slots=True)
+class DownloadFailed:
+    book_id: int
+    reason: FailureReason
+
+
+IngestResult = BookDownloaded | DownloadFailed
+
 
 class IngestBookUseCase:
-    def __init__(
-        self,
-        downloader: BookDownloader,
-        datalake: DatalakeStorage,
-        control: ControlStateStore
-    ):
+    """
+    Downloads a book and stores it in the datalake (SPEC 8.1 step 4).
+    A failed download writes nothing to the datalake (SPEC 3.4), and a
+    successful one is recorded only after it is stored (SPEC 8).
+    """
+
+    def __init__(self, downloader: BookDownloader, datalake: DatalakeStorage, control: ControlStateStore):
         self.downloader = downloader
         self.datalake = datalake
         self.control = control
 
-    def execute(self, book_id: int) -> Dict[str, Any]:
-        """
-        Orchestrates the download and datalake storage for a given book.
-        Returns structured data about the operation's outcome.
-        """
+    def execute(self, book_id: int) -> IngestResult:
         try:
-            header_text, body_text = self.downloader.download(book_id)
-            header_path, body_path = self.datalake.save(book_id, header_text, body_text)
+            text = self.downloader.download(book_id)
+        except DownloadException as error:
+            self.control.record_failure(book_id, error.reason)
+            return DownloadFailed(book_id, error.reason)
 
-            self.control.record_download(book_id)
-
-            return {
-                "status": "SUCCESS",
-                "book_id": book_id,
-                "paths": {
-                    "header": header_path,
-                    "body": body_path
-                }
-            }
-
-        except DownloadException as e:
-            self.control.record_failure(book_id, e.reason.value)
-            return {
-                "status": "FAILED",
-                "book_id": book_id,
-                "reason": e.reason.value
-            }
+        paths = self.datalake.save(book_id, text)
+        self.control.record_download(book_id)
+        return BookDownloaded(book_id, paths)

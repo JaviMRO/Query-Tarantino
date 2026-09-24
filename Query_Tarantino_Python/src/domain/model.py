@@ -7,6 +7,24 @@ from enum import Enum
 
 INDEXABLE_LANGUAGE = "en"
 
+MAX_FAILED_ATTEMPTS = 3
+
+
+@dataclass(frozen=True, slots=True)
+class BookText:
+    """Header and body of a book, split at the Gutenberg markers (SPEC 3.4)."""
+
+    header: str
+    body: str
+
+
+@dataclass(frozen=True, slots=True)
+class StoredPaths:
+    """Datalake paths, relative to TARANTINO_DATA_DIR with '/' separators (SPEC 5.4)."""
+
+    header: str
+    body: str
+
 
 @dataclass(frozen=True, slots=True)
 class Book:
@@ -31,7 +49,10 @@ class TermOccurrences:
 
 
 class FailureReason(Enum):
-    """Why a download failed (SPEC 3.4)."""
+    """
+    Why a download failed (SPEC 3.4). A book that reaches
+    MAX_FAILED_ATTEMPTS failures is never proposed again (SPEC 3.5).
+    """
 
     HTTP_ERROR = "HTTP_ERROR"
     NO_MARKERS = "NO_MARKERS"

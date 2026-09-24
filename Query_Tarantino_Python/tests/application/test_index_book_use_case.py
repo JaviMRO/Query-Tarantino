@@ -1,79 +1,63 @@
 from datetime import datetime, timezone
 
-from src.application.index_book_use_case import STATUS_INDEXED, STATUS_SKIPPED, IndexBookUseCase
+from src.application.index_book_use_case import BookIndexed, BookSkipped, IndexBookUseCase
+from src.domain.model import Book, BookText
+from tests.application.fakes import (
+    CallLog,
+    FakeControlStateStore,
+    FakeDatalake,
+    FakeIndexStorage,
+    FakeMetadataStorage,
+    paths_for,
+)
 
+BOOK_ID = 2701
 ENGLISH_HEADER = "Title: Moby Dick\nLanguage: English"
 SPANISH_HEADER = "Title: Don Quijote\nLanguage: Spanish"
 FIXED_NOW = datetime(2026, 9, 24, 8, 5, 3, tzinfo=timezone.utc)
 
 
-class FakeDatalake:
-    def __init__(self, header: str, body: str):
-        self.header, self.body = header, body
-
-    def load(self, book_id):
-        return self.header, self.body
-
-    def get_paths(self, book_id):
-        return f"lake/{book_id}.header.txt", f"lake/{book_id}.body.txt"
-
-
-class Recorder:
-    """Records every call, in order, across all the stores it plays."""
-
-    def __init__(self):
-        self.calls = []
-
-    def __getattr__(self, name):
-        return lambda *args: self.calls.append((name, *args))
-
-
-def build(header: str, body: str = "whale whale ship"):
-    recorder = Recorder()
-    use_case = IndexBookUseCase(
-        datalake=FakeDatalake(header, body),
-        metadata_store=recorder,
-        index_store=recorder,
-        control=recorder,
+def build(header: str, log: CallLog) -> IndexBookUseCase:
+    return IndexBookUseCase(
+        datalake=FakeDatalake(log, {BOOK_ID: BookText(header, "whale whale ship")}),
+        metadata_store=FakeMetadataStorage(log),
+        index_store=FakeIndexStorage(log),
+        control=FakeControlStateStore(log),
         stopwords=frozenset({"the"}),
         clock=lambda: FIXED_NOW,
     )
-    return use_case, recorder
 
 
-def test_english_book_is_indexed_in_spec_order():
-    use_case, recorder = build(ENGLISH_HEADER)
+def test_english_book_is_indexed_in_spec_order() -> None:
+    log = CallLog()
 
-    result = use_case.execute(2701)
+    result = build(ENGLISH_HEADER, log).execute(BOOK_ID)
 
-    assert [call[0] for call in recorder.calls] == [
-        "save", "write_book_terms", "update_indexed_at", "record_indexing",
-    ]
-    assert result == {"status": STATUS_INDEXED, "book_id": 2701, "language": "en", "terms_count": 2}
+    assert log.methods() == ["save_metadata", "write_book_terms", "update_indexed_at", "record_indexing"]
+    assert result == BookIndexed(BOOK_ID, terms_count=2)
 
 
-def test_metadata_is_saved_with_datalake_paths():
-    use_case, recorder = build(ENGLISH_HEADER)
+def test_metadata_is_saved_with_datalake_paths() -> None:
+    log = CallLog()
 
-    use_case.execute(2701)
+    build(ENGLISH_HEADER, log).execute(BOOK_ID)
 
-    _, book, header_path, body_path = recorder.calls[0]
-    assert book.title == "Moby Dick"
-    assert (header_path, body_path) == ("lake/2701.header.txt", "lake/2701.body.txt")
-
-
-def test_indexed_at_uses_spec_format():
-    use_case, recorder = build(ENGLISH_HEADER)
-
-    use_case.execute(2701)
-
-    assert ("update_indexed_at", 2701, "2026-09-24T08:05:03Z") in recorder.calls
+    expected_book = Book(BOOK_ID, "Moby Dick", "", "en", "")
+    assert log.calls[0] == ("save_metadata", expected_book, paths_for(BOOK_ID))
 
 
-def test_non_english_book_only_saves_metadata():
-    use_case, recorder = build(SPANISH_HEADER)
+def test_indexed_at_uses_spec_format() -> None:
+    log = CallLog()
 
-    result = use_case.execute(2000)
+    build(ENGLISH_HEADER, log).execute(BOOK_ID)
 
-    assert [call[0] for call in recorder.calls] == ["save", "record_indexing"]
-    assert result == {"status": STATUS_SKIPPED, "book_id": 2000, "language": "es", "terms_count": 0}
+    assert ("update_indexed_at", BOOK_ID, "2026-09-24T08:05:03Z") in log.calls
+
+
+def test_non_english_book_only_saves_metadata() -> None:
+    log = CallLog()
+
+    result = build(SPANISH_HEADER, log).execute(BOOK_ID)
+
+    assert log.methods() == ["save_metadata", "record_indexing"]
+    assert result == BookSkipped(BOOK_ID, language="es")

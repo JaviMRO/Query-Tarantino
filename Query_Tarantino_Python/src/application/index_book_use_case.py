@@ -1,16 +1,30 @@
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict
 
-from ..domain.header_parser import parse_header
-from ..domain.ports import ControlStateStore, DatalakeStorage, InvertedIndexStorage, MetadataStorage
-from ..domain.tokenizer import tokenize
+from src.domain.header_parser import parse_header
+from src.domain.model import Book, BookText
+from src.domain.ports import ControlStateStore, DatalakeStorage, InvertedIndexStorage, MetadataStorage
+from src.domain.tokenizer import tokenize
 
-STATUS_INDEXED = "INDEXED"
-STATUS_SKIPPED = "SKIPPED"
-
-# SPEC 5.4: YYYY-MM-DDTHH:MM:SSZ in UTC
 INDEXED_AT_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+
+
+@dataclass(frozen=True, slots=True)
+class BookIndexed:
+    book_id: int
+    terms_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class BookSkipped:
+    """Not in English: only its metadata was saved."""
+
+    book_id: int
+    language: str
+
+
+IndexResult = BookIndexed | BookSkipped
 
 
 def utc_now() -> datetime:
@@ -19,18 +33,20 @@ def utc_now() -> datetime:
 
 class IndexBookUseCase:
     """
-    Indexes a single book already stored in the datalake, in the order
-    defined in SPEC 8.2.
+    Indexes a book already stored in the datalake (SPEC 8.2):
+    metadata is always saved, but only English books reach the index.
+    The book is recorded as indexed only after its data is written (SPEC 8).
+    indexed_at uses INDEXED_AT_FORMAT, in UTC (SPEC 5.4).
     """
 
     def __init__(
-            self,
-            datalake: DatalakeStorage,
-            metadata_store: MetadataStorage,
-            index_store: InvertedIndexStorage,
-            control: ControlStateStore,
-            stopwords: frozenset[str],
-            clock: Callable[[], datetime] = utc_now
+        self,
+        datalake: DatalakeStorage,
+        metadata_store: MetadataStorage,
+        index_store: InvertedIndexStorage,
+        control: ControlStateStore,
+        stopwords: frozenset[str],
+        clock: Callable[[], datetime] = utc_now,
     ):
         self.datalake = datalake
         self.metadata_store = metadata_store
@@ -39,32 +55,25 @@ class IndexBookUseCase:
         self.stopwords = stopwords
         self.clock = clock
 
-    def execute(self, book_id: int) -> Dict[str, Any]:
-        """Runs SPEC 8.2 and returns the outcome as structured data."""
-
-        # 1. Read header and body from the datalake
-        header_text, body_text = self.datalake.load(book_id)
-        header_path, body_path = self.datalake.get_paths(book_id)
-
-        # 2. Extract metadata and write it with indexed_at empty
-        book = parse_header(book_id, header_text)
-        self.metadata_store.save(book, header_path, body_path)
-
-        # 3-5. Only English books are indexed (SPEC 5.2)
-        terms_count = self._index_body(book_id, body_text) if book.is_indexable() else 0
-
-        # Appended only after the data is written (SPEC 8), indexed or not
+    def execute(self, book_id: int) -> IndexResult:
+        text = self.datalake.load(book_id)
+        book = self._save_metadata(book_id, text)
+        result = self._index_or_skip(book, text.body)
         self.control.record_indexing(book_id)
+        return result
 
-        return {
-            "status": STATUS_INDEXED if book.is_indexable() else STATUS_SKIPPED,
-            "book_id": book_id,
-            "language": book.language,
-            "terms_count": terms_count,
-        }
+    def _save_metadata(self, book_id: int, text: BookText) -> Book:
+        book = parse_header(book_id, text.header)
+        self.metadata_store.save(book, self.datalake.get_paths(book_id))
+        return book
 
-    def _index_body(self, book_id: int, body_text: str) -> int:
-        terms = tokenize(body_text, self.stopwords)
-        self.index_store.write_book_terms(book_id, terms)
-        self.metadata_store.update_indexed_at(book_id, self.clock().strftime(INDEXED_AT_FORMAT))
-        return len(terms)
+    def _index_or_skip(self, book: Book, body: str) -> IndexResult:
+        if not book.is_indexable():
+            return BookSkipped(book.book_id, book.language)
+        return self._index_body(book, body)
+
+    def _index_body(self, book: Book, body: str) -> BookIndexed:
+        terms = tokenize(body, self.stopwords)
+        self.index_store.write_book_terms(book.book_id, terms)
+        self.metadata_store.update_indexed_at(book.book_id, self.clock().strftime(INDEXED_AT_FORMAT))
+        return BookIndexed(book.book_id, len(terms))

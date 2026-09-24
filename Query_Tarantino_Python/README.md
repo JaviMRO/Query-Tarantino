@@ -15,8 +15,23 @@ adaptadores concretos (SQLite, MongoDB, JSON, HTTP).
 ```bash
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+pip install -r requirements-dev.txt   # o requirements.txt si no vas a lanzar tests
 ```
+
+## Comprobaciones
+
+Desde `Query_Tarantino_Python/`, las mismas que ejecuta el CI en cada push:
+
+```bash
+ruff check .          # errores y estilo (ruff check . --fix corrige lo automático)
+ruff format .         # formatea el código
+mypy src tests        # tipos: los adapters cumplen los ports
+python -m pytest      # tests
+```
+
+La configuración está en `pyproject.toml` y el CI en `.github/workflows/python.yml`.
+
+`tests/` replica la estructura de `src/`: cada test va en la carpeta del módulo que prueba.
 
 ## Ejecución
 
@@ -28,7 +43,10 @@ python -m src.infrastructure.entrypoints.<futuro_entrypoint>
 
 ```
 src/
-├── domain/            # modelos (dataclasses) y ports (Protocol/ABC)
-├── application/         # casos de uso (orquestación)
-└── infrastructure/      # adaptadores concretos + entrypoints (futuro CLI/API/UI)
+├── domain/            # reglas de la SPEC (tokenizer, parser, split) y ports (Protocol)
+├── application/       # casos de uso (orquestación)
+└── infrastructure/    # adaptadores concretos + entrypoints (futuro CLI)
+tests/                 # misma estructura que src/
 ```
+
+Las reglas compartidas por Python, Java y C++ están en `../shared/SPEC.md`.

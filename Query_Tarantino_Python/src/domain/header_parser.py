@@ -5,14 +5,13 @@ Extracts metadata from a Project Gutenberg header following SPEC 5.1 and 5.2.
 import re
 
 from src.domain.model import Book
-
-ASCII_WHITESPACE = " \t\n\r\f\v"
+from src.domain.text import ASCII_CASE_INSENSITIVE, strip_ascii_whitespace
 
 _FIELD_PATTERNS = {
-    "title": re.compile(r"^Title:\s*(.*)$", re.IGNORECASE),
-    "author": re.compile(r"^Author:\s*(.*)$", re.IGNORECASE),
-    "language": re.compile(r"^Language:\s*(.*)$", re.IGNORECASE),
-    "release_date": re.compile(r"^Release date:\s*([^\[]*)", re.IGNORECASE),
+    "title": re.compile(r"^Title:\s*(.*)$", ASCII_CASE_INSENSITIVE),
+    "author": re.compile(r"^Author:\s*(.*)$", ASCII_CASE_INSENSITIVE),
+    "language": re.compile(r"^Language:\s*(.*)$", ASCII_CASE_INSENSITIVE),
+    "release_date": re.compile(r"^Release date:\s*([^\[]*)", ASCII_CASE_INSENSITIVE),
 }
 
 _LANGUAGE_CODES = {
@@ -47,7 +46,7 @@ def _find_field(lines: list[str], field: str) -> tuple[str, int]:
     for index, line in enumerate(lines):
         match = _FIELD_PATTERNS[field].match(line)
         if match:
-            return match.group(1).strip(ASCII_WHITESPACE), index
+            return strip_ascii_whitespace(match.group(1)), index
     return "", -1
 
 
@@ -55,8 +54,8 @@ def _find_title(lines: list[str]) -> str:
     title, index = _find_field(lines, "title")
     if index < 0:
         return title
-    for line in lines[index + 1:]:
-        continuation = line.strip(ASCII_WHITESPACE)
+    for line in lines[index + 1 :]:
+        continuation = strip_ascii_whitespace(line)
         if not line.startswith((" ", "\t")) or not continuation:
             break
         title = f"{title} {continuation}"
@@ -64,5 +63,5 @@ def _find_title(lines: list[str]) -> str:
 
 
 def _normalize_language(value: str) -> str:
-    language = value.split(",", 1)[0].strip(ASCII_WHITESPACE).translate(_ASCII_LOWERCASE)
+    language = strip_ascii_whitespace(value.split(",", 1)[0]).translate(_ASCII_LOWERCASE)
     return _LANGUAGE_CODES.get(language, language)
