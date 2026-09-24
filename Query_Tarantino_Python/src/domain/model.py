@@ -1,28 +1,44 @@
 """
-TODO: Modelos de dominio: Book (libro descargado de Project Gutenberg, con
-id, title, author, language, etc.) y PostingList (lista de ocurrencias de un
-termino del indice invertido). Implementados como dataclasses. No deben
-depender de ninguna libreria externa.
+Domain models. No external dependencies. Rules: shared/SPEC.md.
 """
 
 from dataclasses import dataclass
+from enum import Enum
+
+INDEXABLE_LANGUAGE = "en"
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class Book:
-    pass  # TODO: definir campos (id, title, author, language, etc.)
+    """Metadata extracted from a book header (SPEC 5). Missing fields are ""."""
+
+    book_id: int
+    title: str
+    author: str
+    language: str
+    release_date: str
+
+    def is_indexable(self) -> bool:
+        return self.language == INDEXABLE_LANGUAGE
 
 
-@dataclass
-class PostingList:
-    pass  # TODO: definir campos (term, postings, etc.)
+@dataclass(frozen=True, slots=True)
+class TermOccurrences:
+    """Occurrences of a term in one book (SPEC 6.2)."""
+
+    tf: int
+    positions: tuple[int, ...]
 
 
-@dataclass
-class RawBook:
-    pass  # TODO: definir campos (id, header, body, etc.)
+class FailureReason(Enum):
+    """Why a download failed (SPEC 3.4)."""
+
+    HTTP_ERROR = "HTTP_ERROR"
+    NO_MARKERS = "NO_MARKERS"
+    EMPTY_BODY = "EMPTY_BODY"
 
 
-@dataclass
-class BookLocation:
-    pass  # TODO: definir campos (book_id, path, etc.)
+class DownloadException(Exception):
+    def __init__(self, reason: FailureReason):
+        super().__init__(reason.value)
+        self.reason = reason

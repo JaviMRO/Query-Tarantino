@@ -1,6 +1,6 @@
 # src/domain/ports.py
 from typing import Protocol, Tuple, Set, Dict, List
-from ..domain.model import Book  # Assuming Book is defined in model.py
+from ..domain.model import Book, TermOccurrences
 
 class DatalakeStorage(Protocol):
     """
@@ -18,6 +18,12 @@ class DatalakeStorage(Protocol):
         """
         Reads a book from the datalake.
         Returns: (header_text, body_text).
+        """
+        ...
+
+    def get_paths(self, book_id: int) -> Tuple[str, str]:
+        """
+        Returns: (header_path, body_path) of a stored book, in the same format as save().
         """
         ...
 
@@ -41,8 +47,11 @@ class InvertedIndexStorage(Protocol):
     Port defining how the inverted index is persisted.
     Implementations: monolithic JSON, MongoDB collection, or A-Z folders.
     """
-    def write_book_terms(self, book_id: int, terms: Dict[str, int]) -> None:
-        """Writes or appends the terms of a single book to the index."""
+    def write_book_terms(self, book_id: int, terms: Dict[str, TermOccurrences]) -> None:
+        """
+        Writes or appends the terms of a single book to the index.
+        JSON and folders store only tf; MongoDB also stores positions (SPEC 7).
+        """
         ...
 
 
