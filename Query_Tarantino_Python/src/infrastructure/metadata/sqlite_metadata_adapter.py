@@ -30,7 +30,7 @@ class SqliteMetadataAdapter:
 
     def save(self, book: Book, paths: StoredPaths) -> None:
         query = """
-            INSERT OR REPLACE INTO books 
+            INSERT OR REPLACE INTO books
             (book_id, title, author, language, release_date, header_path, body_path, indexed_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
         """
