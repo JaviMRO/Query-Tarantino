@@ -22,7 +22,9 @@ die() {
 
 require_file() {
     local file="$1"
-    [[ -f "${file}" ]] || die "required file does not exist: ${file}"
+
+    [[ -f "${file}" ]] \
+        || die "required file does not exist: ${file}"
 }
 
 prepare_output() {
@@ -35,8 +37,15 @@ run_one() {
 
     local peak_file
     local peak_rss
+    local bench_output
 
-    peak_file="${OUTPUT_FILE}.peak_rss"
+    if [[ "${run}" -eq 0 ]]; then
+        bench_output="$(mktemp --suffix=.csv)"
+    else
+        bench_output="${OUTPUT_FILE}"
+    fi
+
+    peak_file="${bench_output}.peak_rss"
 
     rm -f "${peak_file}"
 
@@ -50,14 +59,14 @@ run_one() {
     echo "----------------------------------------"
 
     "${PEAK_RSS_SCRIPT}" \
-        "${OUTPUT_FILE}" \
+        "${bench_output}" \
         bash -c "${TARANTINO_CMD} bench \
             --experiment download \
             --structure none \
             --books '${BOOKS_FILE}' \
             --n '${n_books}' \
             --run '${run}' \
-            --out '${OUTPUT_FILE}'"
+            --out '${bench_output}'"
 
     [[ -f "${peak_file}" ]] \
         || die "peak RSS measurement was not produced"
@@ -67,16 +76,22 @@ run_one() {
     [[ "${peak_rss}" =~ ^[0-9]+$ ]] \
         || die "invalid peak RSS value: ${peak_rss}"
 
-    printf '%s,%s,%s,%s,peak_rss,%.1f,bytes,%s\n' \
-        "${LANGUAGE}" \
-        "download" \
-        "none" \
-        "${n_books}" \
-        "${peak_rss}" \
-        "${run}" \
-        >> "${OUTPUT_FILE}"
+    if [[ "${run}" -ne 0 ]]; then
+        printf '%s,%s,%s,%s,peak_rss,%.1f,bytes,%s\n' \
+            "${LANGUAGE}" \
+            "download" \
+            "none" \
+            "${n_books}" \
+            "${peak_rss}" \
+            "${run}" \
+            >> "${OUTPUT_FILE}"
+    fi
 
     rm -f "${peak_file}"
+
+    if [[ "${run}" -eq 0 ]]; then
+        rm -f "${bench_output}"
+    fi
 }
 
 main() {

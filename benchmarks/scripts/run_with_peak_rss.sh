@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
-
 set -euo pipefail
 
 if [[ $# -lt 2 ]]; then
-    echo "Usage: run_with_peak_rss.sh <output_csv> <command> [args...]"
+    echo "Usage: run_with_peak_rss.sh <output_csv> <command> [args...]" >&2
     exit 1
 fi
 

@@ -45,6 +45,12 @@ check_prerequisites() {
 
     [[ -x "/usr/bin/time" ]] \
         || die "/usr/bin/time is required"
+
+    [[ -n "${JAVA_CMD}" ]] \
+        || die "TARANTINO_JAVA_CMD is not set"
+
+    [[ -n "${CPP_CMD}" ]] \
+        || die "TARANTINO_CPP_CMD is not set"
 }
 
 run_language_benchmarks() {
@@ -87,22 +93,13 @@ main() {
 
     check_prerequisites
 
-    # Python
     run_language_benchmarks \
         "python" \
         "${PYTHON_CMD}"
 
-    # Java
-    [[ -n "${JAVA_CMD}" ]] \
-        || die "TARANTINO_JAVA_CMD is not set"
-
     run_language_benchmarks \
         "java" \
         "${JAVA_CMD}"
-
-    # C++
-    [[ -n "${CPP_CMD}" ]] \
-        || die "TARANTINO_CPP_CMD is not set"
 
     run_language_benchmarks \
         "cpp" \

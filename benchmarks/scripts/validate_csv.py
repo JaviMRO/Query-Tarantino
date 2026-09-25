@@ -67,11 +67,14 @@ VALID_METRICS = {
 }
 
 VALID_N_BOOKS = {100, 250, 500, 1000}
-VALID_RUNS = {0, 1, 2, 3}
+
+# run=0 is warm-up.
+# Only runs 1, 2 and 3 are official measurements.
+VALID_RUNS = {1, 2, 3}
 
 
 def fail(message: str) -> None:
-    print(f"ERROR: {message}")
+    print(f"ERROR: {message}", file=sys.stderr)
     sys.exit(1)
 
 
@@ -234,8 +237,8 @@ def validate_file(path: Path) -> None:
 
                 if run not in VALID_RUNS:
                     fail(
-                        f"line {line_number}: run must be "
-                        f"0, 1, 2 or 3"
+                        f"line {line_number}: official results "
+                        f"must use run 1, 2 or 3; found '{run}'"
                     )
 
                 row_key = (
@@ -324,8 +327,8 @@ def validate_file(path: Path) -> None:
 def main() -> None:
     if len(sys.argv) != 2:
         print(
-            "Usage: python validate_csv.py "
-            "<csv_file>"
+            "Usage: python validate_csv.py <csv_file>",
+            file=sys.stderr,
         )
         sys.exit(1)
 
