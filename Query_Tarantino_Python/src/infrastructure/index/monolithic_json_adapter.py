@@ -29,4 +29,6 @@ class MonolithicJsonAdapter:
     def _load_existing_data(self) -> dict[str, dict[str, int]]:
         if not self._index_path.exists():
             return {}
-        return json.loads(self._index_path.read_text(encoding="utf-8"))
+
+        data: dict[str, dict[str, int]] = json.loads(self._index_path.read_text(encoding="utf-8"))
+        return data
