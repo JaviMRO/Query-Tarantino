@@ -6,16 +6,16 @@ set -euo pipefail
 # Query Tarantino - Sprint 1
 # Equivalence Check
 #
-# Según shared/SPEC.md:
-#   1. Procesar los 20 libros de sample_data desde cero.
-#   2. Usar datalake "time" e índice "json".
-#   3. Comparar inverted_index.json mediante SHA-256.
-#   4. Comparar SQLite "books", ignorando:
+# According to shared/SPEC.md:
+#   1. Process the 20 books from sample_data from scratch.
+#   2. Use datalake "time" and index "json".
+#   3. Compare inverted_index.json using SHA-256.
+#   4. Compare SQLite "books", ignoring:
 #        - header_path
 #        - body_path
 #        - indexed_at
-#   5. Ejecutar las primeras 10 queries de queries.txt.
-#   6. Comparar libros, orden y scores (< 1e-6).
+#   5. Run the first 10 queries from queries.txt.
+#   6. Compare books, order, and scores (< 1e-6).
 #
 # ============================================================
 
@@ -26,9 +26,9 @@ SAMPLE_DATA_DIR="${PROJECT_ROOT}/sample_data"
 QUERIES_FILE="${PROJECT_ROOT}/shared/queries.txt"
 
 # ------------------------------------------------------------
-# Comandos de cada implementación
+# Commands for each implementation
 #
-# Se pueden sobrescribir mediante variables de entorno.
+# They can be overridden using environment variables.
 # ------------------------------------------------------------
 
 PYTHON_CMD="${TARANTINO_PYTHON_CMD:-python -m tarantino}"
@@ -36,10 +36,10 @@ JAVA_CMD="${TARANTINO_JAVA_CMD:-}"
 CPP_CMD="${TARANTINO_CPP_CMD:-}"
 
 # ------------------------------------------------------------
-# Directorios de datos de cada implementación
+# Data directories for each implementation
 #
-# Si las implementaciones usan otras rutas, se pueden cambiar
-# mediante TARANTINO_*_DATA_DIR.
+# If the implementations use different paths, they can be changed
+# using TARANTINO_*_DATA_DIR.
 # ------------------------------------------------------------
 
 PYTHON_DATA_DIR="${TARANTINO_PYTHON_DATA_DIR:-${PROJECT_ROOT}/data/python}"
@@ -47,13 +47,13 @@ JAVA_DATA_DIR="${TARANTINO_JAVA_DATA_DIR:-${PROJECT_ROOT}/data/java}"
 CPP_DATA_DIR="${TARANTINO_CPP_DATA_DIR:-${PROJECT_ROOT}/data/cpp}"
 
 # ------------------------------------------------------------
-# Rutas de SQLite
+# SQLite paths
 #
-# IMPORTANTE:
-# Cuando sepáis la ruta oficial, SOLO hay que cambiar estas
-# tres variables.
+# IMPORTANT:
+# When you know the official path, ONLY these three variables
+# need to be changed.
 #
-# Ejemplo:
+# Example:
 # TARANTINO_PYTHON_DB="${PROJECT_ROOT}/data/python/tarantino.db"
 # ------------------------------------------------------------
 
@@ -62,10 +62,10 @@ JAVA_DB="${TARANTINO_JAVA_DB:-}"
 CPP_DB="${TARANTINO_CPP_DB:-}"
 
 # ------------------------------------------------------------
-# Rutas de los índices
+# Index paths
 #
-# Se pueden cambiar posteriormente si la implementación utiliza
-# otra ubicación.
+# They can be changed later if the implementation uses
+# a different location.
 # ------------------------------------------------------------
 
 PYTHON_INDEX="${TARANTINO_PYTHON_INDEX:-${PYTHON_DATA_DIR}/inverted_index.json}"
@@ -73,7 +73,7 @@ JAVA_INDEX="${TARANTINO_JAVA_INDEX:-${JAVA_DATA_DIR}/inverted_index.json}"
 CPP_INDEX="${TARANTINO_CPP_INDEX:-${CPP_DATA_DIR}/inverted_index.json}"
 
 # ------------------------------------------------------------
-# Directorio temporal
+# Temporary directory
 # ------------------------------------------------------------
 
 TMP_DIR="$(mktemp -d)"
@@ -89,7 +89,7 @@ JAVA_RESULTS="${TMP_DIR}/java_results.jsonl"
 CPP_RESULTS="${TMP_DIR}/cpp_results.jsonl"
 
 # ------------------------------------------------------------
-# Funciones auxiliares
+# Helper functions
 # ------------------------------------------------------------
 
 fail() {
@@ -106,31 +106,31 @@ info() {
 }
 
 # ------------------------------------------------------------
-# Comprobaciones iniciales
+# Initial checks
 # ------------------------------------------------------------
 
 info "Checking project files"
 
 [[ -d "${SAMPLE_DATA_DIR}" ]] \
-    || fail "sample_data/ no existe: ${SAMPLE_DATA_DIR}"
+    || fail "sample_data/ does not exist: ${SAMPLE_DATA_DIR}"
 
 [[ -f "${QUERIES_FILE}" ]] \
-    || fail "shared/queries.txt no existe: ${QUERIES_FILE}"
+    || fail "shared/queries.txt does not exist: ${QUERIES_FILE}"
 
 SAMPLE_COUNT="$(find "${SAMPLE_DATA_DIR}" -type f | wc -l)"
 
 if [[ "${SAMPLE_COUNT}" -ne 20 ]]; then
-    fail "Se esperaban exactamente 20 archivos en sample_data/, encontrados ${SAMPLE_COUNT}"
+    fail "Exactly 20 files were expected in sample_data/, found ${SAMPLE_COUNT}"
 fi
 
 [[ -n "${JAVA_CMD}" ]] \
-    || fail "TARANTINO_JAVA_CMD no está configurado."
+    || fail "TARANTINO_JAVA_CMD is not configured."
 
 [[ -n "${CPP_CMD}" ]] \
-    || fail "TARANTINO_CPP_CMD no está configurado."
+    || fail "TARANTINO_CPP_CMD is not configured."
 
 # ------------------------------------------------------------
-# Función para ejecutar index
+# Function to run index
 # ------------------------------------------------------------
 
 run_index() {
@@ -142,10 +142,10 @@ run_index() {
     (
         cd "${PROJECT_ROOT}"
 
-        # El CLI definido en SPEC es:
+        # CLI defined in SPEC:
         # tarantino index N
         #
-        # Para la equivalencia usamos N=20.
+        # For equivalence, we use N=20.
         #
         # shellcheck disable=SC2086
         ${command} index 20
@@ -153,7 +153,7 @@ run_index() {
 }
 
 # ------------------------------------------------------------
-# Función para ejecutar las primeras 10 queries
+# Function to run the first 10 queries
 # ------------------------------------------------------------
 
 run_queries() {
@@ -167,21 +167,21 @@ run_queries() {
 
     head -n 10 "${QUERIES_FILE}" | while IFS= read -r query; do
 
-        # Ignorar líneas vacías.
+        # Ignore empty lines.
         [[ -z "${query}" ]] && continue
 
         (
             cd "${PROJECT_ROOT}"
 
-            # Python se utiliza únicamente para escapar correctamente
-            # la query antes de pasarla al shell.
+            # Python is used only to correctly escape
+            # the query before passing it to the shell.
             quoted_query="$(
                 python -c \
                 'import shlex,sys; print(shlex.quote(sys.argv[1]))' \
                 "${query}"
             )"
 
-            # CLI definido en SPEC:
+            # CLI defined in SPEC:
             # tarantino search "TEXT" --json
 
             # shellcheck disable=SC2086
@@ -225,19 +225,19 @@ mkdir -p "${CPP_DATA_DIR}"
 run_index "cpp" "${CPP_CMD}"
 
 # ------------------------------------------------------------
-# COMPARACIÓN DE inverted_index.json
+# COMPARISON OF inverted_index.json
 # ------------------------------------------------------------
 
 info "Comparing inverted indexes"
 
 [[ -f "${PYTHON_INDEX}" ]] \
-    || fail "No existe el índice Python: ${PYTHON_INDEX}"
+    || fail "Python index does not exist: ${PYTHON_INDEX}"
 
 [[ -f "${JAVA_INDEX}" ]] \
-    || fail "No existe el índice Java: ${JAVA_INDEX}"
+    || fail "Java index does not exist: ${JAVA_INDEX}"
 
 [[ -f "${CPP_INDEX}" ]] \
-    || fail "No existe el índice C++: ${CPP_INDEX}"
+    || fail "C++ index does not exist: ${CPP_INDEX}"
 
 PYTHON_SHA="$(sha256sum "${PYTHON_INDEX}" | awk '{print $1}')"
 JAVA_SHA="$(sha256sum "${JAVA_INDEX}" | awk '{print $1}')"
@@ -248,23 +248,22 @@ echo "Java   SHA-256: ${JAVA_SHA}"
 echo "C++    SHA-256: ${CPP_SHA}"
 
 if [[ "${PYTHON_SHA}" != "${JAVA_SHA}" ]]; then
-    fail "Python y Java producen inverted_index.json diferentes."
+    fail "Python and Java produce different inverted_index.json files."
 fi
 
 if [[ "${PYTHON_SHA}" != "${CPP_SHA}" ]]; then
-    fail "Python y C++ producen inverted_index.json diferentes."
+    fail "Python and C++ produce different inverted_index.json files."
 fi
 
 echo
-echo "OK: los tres inverted_index.json son idénticos."
+echo "OK: all three inverted_index.json files are identical."
 
 # ------------------------------------------------------------
-# COMPARACIÓN DE SQLITE
+# COMPARISON OF SQLITE
 #
-# Las rutas se dejan configurables.
+# The paths are configurable.
 #
-# Cuando tengáis las rutas oficiales, solo hay que ponerlas
-# arriba en:
+# Once you have the official paths, simply set them above:
 #
 #   PYTHON_DB="..."
 #   JAVA_DB="..."
@@ -277,27 +276,27 @@ info "Comparing SQLite databases"
 if [[ -z "${PYTHON_DB}" || -z "${JAVA_DB}" || -z "${CPP_DB}" ]]; then
 
     echo
-    echo "SQLite todavía no está configurado."
+    echo "SQLite is not configured yet."
     echo
-    echo "Cuando tengáis las rutas oficiales, configurar:"
+    echo "Once you have the official paths, configure:"
     echo
     echo "PYTHON_DB=\"...\""
     echo "JAVA_DB=\"...\""
     echo "CPP_DB=\"...\""
     echo
-    echo "La comprobación SQLite se ejecutará automáticamente."
+    echo "The SQLite check will run automatically."
     echo
 
 else
 
     [[ -f "${PYTHON_DB}" ]] \
-        || fail "No existe SQLite Python: ${PYTHON_DB}"
+        || fail "Python SQLite database does not exist: ${PYTHON_DB}"
 
     [[ -f "${JAVA_DB}" ]] \
-        || fail "No existe SQLite Java: ${JAVA_DB}"
+        || fail "Java SQLite database does not exist: ${JAVA_DB}"
 
     [[ -f "${CPP_DB}" ]] \
-        || fail "No existe SQLite C++: ${CPP_DB}"
+        || fail "C++ SQLite database does not exist: ${CPP_DB}"
 
     python - \
         "${PYTHON_DB}" \
@@ -320,14 +319,14 @@ def load_books(database):
     try:
         cursor = connection.cursor()
 
-        # La tabla books forma parte de la persistencia definida
-        # para la equivalencia.
+        # The books table is part of the persistence defined
+        # for the equivalence check.
         cursor.execute("PRAGMA table_info(books)")
         columns_info = cursor.fetchall()
 
         if not columns_info:
             raise RuntimeError(
-                f"No se encontró la tabla 'books' en {database}"
+                f"Table 'books' was not found in {database}"
             )
 
         columns = [
@@ -338,11 +337,10 @@ def load_books(database):
 
         if not columns:
             raise RuntimeError(
-                f"No hay columnas comparables en books: {database}"
+                f"No comparable columns found in books: {database}"
             )
 
-        # quoted identifiers para soportar nombres de columnas
-        # correctamente.
+        # Quoted identifiers to correctly support column names.
         quoted_columns = ", ".join(
             '"' + column.replace('"', '""') + '"'
             for column in columns
@@ -369,22 +367,22 @@ def compare(reference_name, reference, candidate_name, candidate):
 
     if reference_columns != candidate_columns:
         raise AssertionError(
-            f"Columnas diferentes entre "
-            f"{reference_name} y {candidate_name}: "
+            f"Different columns between "
+            f"{reference_name} and {candidate_name}: "
             f"{reference_columns} != {candidate_columns}"
         )
 
     if reference_rows != candidate_rows:
         raise AssertionError(
-            f"La tabla books es diferente entre "
-            f"{reference_name} y {candidate_name}"
+            f"The books table differs between "
+            f"{reference_name} and {candidate_name}"
         )
 
 
 def main():
     if len(sys.argv) != 4:
         raise SystemExit(
-            "Uso: compare sqlite python java cpp"
+            "Usage: compare sqlite python java cpp"
         )
 
     python_db, java_db, cpp_db = sys.argv[1:]
@@ -407,7 +405,7 @@ def main():
         cpp_books,
     )
 
-    print("OK: SQLite books es equivalente.")
+    print("OK: SQLite books tables are equivalent.")
 
 
 if __name__ == "__main__":
@@ -432,7 +430,7 @@ python "${SCRIPT_DIR}/scripts/compare_search_results.py" \
     "${CPP_RESULTS}"
 
 # ------------------------------------------------------------
-# RESULTADO
+# RESULT
 # ------------------------------------------------------------
 
 echo
@@ -440,5 +438,5 @@ echo "============================================================"
 echo "EQUIVALENCE CHECK PASSED"
 echo "============================================================"
 echo
-echo "Las comprobaciones de equivalencia disponibles han pasado."
+echo "All available equivalence checks have passed."
 echo

@@ -3,17 +3,17 @@
 """
 Query Tarantino - Sprint 1
 
-Compara los resultados de:
+Compares the results of:
     tarantino search "TEXT" --json
 
-según el contrato de equivalencia del SPEC.
+according to the equivalence contract defined in the SPEC.
 
-Se comprueba:
+The following are checked:
 
-    - mismo número de resultados
-    - mismos libros
-    - mismo orden
-    - diferencia absoluta de score < 1e-6
+    - same number of results
+    - same books
+    - same order
+    - absolute score difference < 1e-6
 """
 
 import json
@@ -27,9 +27,9 @@ SCORE_TOLERANCE = 1e-6
 
 def load_results(path: str):
     """
-    Carga los resultados JSON producidos por una implementación.
+    Loads the JSON results produced by an implementation.
 
-    Se espera un objeto JSON por línea.
+    One JSON object is expected per line.
     """
 
     results = []
@@ -38,7 +38,7 @@ def load_results(path: str):
 
     if not file_path.exists():
         raise FileNotFoundError(
-            f"No existe el archivo de resultados: {path}"
+            f"Results file does not exist: {path}"
         )
 
     for line_number, line in enumerate(
@@ -54,7 +54,7 @@ def load_results(path: str):
             result = json.loads(line)
         except json.JSONDecodeError as exc:
             raise ValueError(
-                f"{path}: JSON inválido en la línea "
+                f"{path}: invalid JSON on line "
                 f"{line_number}: {exc}"
             ) from exc
 
@@ -65,16 +65,16 @@ def load_results(path: str):
 
 def get_book_id(result):
     """
-    Obtiene el identificador del libro.
+    Retrieves the book identifier.
 
-    Se acepta 'id' y 'book_id' para que la comprobación no dependa
-    de una elección interna de nombre mientras se integran las
-    implementaciones.
+    Both 'id' and 'book_id' are accepted so that the check does not
+    depend on an internal naming choice while the implementations
+    are being integrated.
     """
 
     if not isinstance(result, dict):
         raise ValueError(
-            f"El resultado no es un objeto JSON: {result!r}"
+            f"Result is not a JSON object: {result!r}"
         )
 
     if "id" in result:
@@ -84,36 +84,36 @@ def get_book_id(result):
         return result["book_id"]
 
     raise ValueError(
-        f"No se encuentra el identificador del libro "
-        f"en el resultado: {result!r}"
+        f"Book identifier not found "
+        f"in result: {result!r}"
     )
 
 
 def get_score(result):
     """
-    Obtiene y valida el score.
+    Retrieves and validates the score.
     """
 
     if not isinstance(result, dict):
         raise ValueError(
-            f"El resultado no es un objeto JSON: {result!r}"
+            f"Result is not a JSON object: {result!r}"
         )
 
     if "score" not in result:
         raise ValueError(
-            f"El resultado no contiene 'score': {result!r}"
+            f"Result does not contain 'score': {result!r}"
         )
 
     try:
         score = float(result["score"])
     except (TypeError, ValueError) as exc:
         raise ValueError(
-            f"Score inválido: {result!r}"
+            f"Invalid score: {result!r}"
         ) from exc
 
     if not math.isfinite(score):
         raise ValueError(
-            f"Score no finito: {result!r}"
+            f"Non-finite score: {result!r}"
         )
 
     return score
@@ -126,13 +126,13 @@ def compare_query_results(
     candidate_name,
 ):
     """
-    Compara dos conjuntos de resultados.
+    Compares two sets of results.
     """
 
     if len(reference) != len(candidate):
         raise AssertionError(
-            f"{reference_name} y {candidate_name} devuelven "
-            f"un número diferente de resultados: "
+            f"{reference_name} and {candidate_name} return "
+            f"a different number of results: "
             f"{len(reference)} != {len(candidate)}"
         )
 
@@ -142,10 +142,10 @@ def compare_query_results(
         reference_id = get_book_id(reference_result)
         candidate_id = get_book_id(candidate_result)
 
-        # Mismo libro y mismo orden.
+        # Same book and same order.
         if reference_id != candidate_id:
             raise AssertionError(
-                f"Libro diferente en posición {position}: "
+                f"Different book at position {position}: "
                 f"{reference_name}={reference_id!r}, "
                 f"{candidate_name}={candidate_id!r}"
             )
@@ -155,21 +155,21 @@ def compare_query_results(
 
         difference = abs(reference_score - candidate_score)
 
-        # SPEC: diferencia de score < 1e-6
+        # SPEC: score difference < 1e-6
         if difference >= SCORE_TOLERANCE:
             raise AssertionError(
-                f"Score diferente en posición {position}, "
-                f"libro {reference_id!r}: "
+                f"Different score at position {position}, "
+                f"book {reference_id!r}: "
                 f"{reference_name}={reference_score}, "
                 f"{candidate_name}={candidate_score}, "
-                f"diferencia={difference}"
+                f"difference={difference}"
             )
 
 
 def main():
     if len(sys.argv) != 4:
         print(
-            "Uso:",
+            "Usage:",
             file=sys.stderr,
         )
         print(
@@ -188,7 +188,7 @@ def main():
         java_results = load_results(java_file)
         cpp_results = load_results(cpp_file)
 
-        # Python se utiliza como referencia.
+        # Python is used as the reference implementation.
         compare_query_results(
             python_results,
             java_results,
