@@ -1,7 +1,7 @@
 # SPEC · Shared rules for Stage 1
 
 **Project:** Query Tarantino · Big Data, ULPGC
-**Version:** 1.4 (draft, pending approval) · 2026-09-29
+**Version:** 1.4 · 2026-09-29
 **Scope:** the three Stage 1 modules (`Query_Tarantino_Java`, `Query_Tarantino_Python`, `Query_Tarantino_Cpp`), the shared repository layout (section 15) and, from phase 2 onwards, the Java version.
 
 This document defines **what** each module must do, precisely enough for all three to produce exactly the same results. It does not say **how** to implement it: each language uses its own tools as long as it follows these rules.
@@ -1058,4 +1058,4 @@ The README is updated in the same pull request that changes any of these points.
 | 1.1 | 2026-09-24 | `sample_data/` renamed to `sample_dataset/` and listed in section 1. `stopwords_en.txt` 1.0 defined as the NLTK English list keeping only `a-z` entries (153 words) |
 | 1.2 | 2026-09-24 | Section 8.1 step 3: the limit of 10 candidates applies only to random IDs; with `--ids` the whole file is traversed; a step with no valid candidate downloads nothing |
 | 1.3 | 2026-09-28 | 3.2: politeness measured between request starts; any network error counts as a failed URL; redirects must be enabled where the client does not follow them. 4.3 and 13.1: `.tmp` leftovers deleted right after acquiring the lock; a command that cannot acquire the lock never deletes it. 4.1: rule for old copies of a book in the `time` datalake. 5.4: index on `title`. 7.1: book IDs converted to strings before sorting, with per-language notes. 9.3: `N` read from SQLite. 10: `bench` arguments. 11: benchmark methodology rewritten: experiments and configurations, bench area, measurement rules, simulated clock, exact definition of every metric, new `recovery` and `baseline` experiments, `metadata` experiment up to 50,000 rows, `run_all.sh` environment and order, validity checks, CSV format and analysis. 12: corpus folder and example command. 13.3: no forced flushes. 14.6 to 14.9: new cases. 15: repository and delivery requirements from the guide |
-| 1.4 | 2026-09-29 | Draft. 1.1: selection tool, 2-second wait between requests following Project Gutenberg's robot policy, resumable order of writes. 1.2: exact query generation rules (index, bands with integer limits, slot-to-band assignment, alphabetical candidates, sampling without replacement with seed 42, query format) |
+| 1.4 | 2026-09-29 | 1.1: selection tool, 2-second wait between requests following Project Gutenberg's robot policy, resumable order of writes. 1.2: exact query generation rules (index, bands with integer limits, slot-to-band assignment, alphabetical candidates, sampling without replacement with seed 42, query format) |
