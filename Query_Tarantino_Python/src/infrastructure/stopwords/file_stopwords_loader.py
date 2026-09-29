@@ -7,5 +7,6 @@ from pathlib import Path
 
 
 def load_stopwords(shared_dir: Path, language: str = "en") -> frozenset[str]:
-    text = (shared_dir / f"stopwords_{language}.txt").read_text(encoding="utf-8")
-    return frozenset(text.split())
+    """One stopword per line; called once per process by the entrypoint."""
+    with (shared_dir / f"stopwords_{language}.txt").open(encoding="utf-8", newline="") as file:
+        return frozenset(word for line in file if (word := line.rstrip("\n")))

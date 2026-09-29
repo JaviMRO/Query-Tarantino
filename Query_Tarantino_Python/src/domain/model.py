@@ -37,6 +37,7 @@ class Book:
     release_date: str
 
     def is_indexable(self) -> bool:
+        """Only English books reach the index (SPEC 5.2)."""
         return self.language == INDEXABLE_LANGUAGE
 
 
@@ -60,6 +61,8 @@ class FailureReason(Enum):
 
 
 class DownloadException(Exception):
+    """A book could not be downloaded, for the given reason (SPEC 3.4)."""
+
     def __init__(self, reason: FailureReason):
         super().__init__(reason.value)
         self.reason = reason

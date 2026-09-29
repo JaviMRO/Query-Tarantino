@@ -102,3 +102,25 @@ def test_the_line_with_the_highest_attempts_counts_even_if_it_is_not_the_last_on
     store = FileControlStateStore(tmp_path)
 
     assert store.get_failure_counts() == {BOOK_ID: 2}
+
+
+def test_state_persists_across_instances(tmp_path: Path) -> None:
+    FileControlStateStore(tmp_path).record_download(BOOK_ID)
+    FileControlStateStore(tmp_path).record_indexing(BOOK_ID)
+    FileControlStateStore(tmp_path).record_failure(5, FailureReason.NO_MARKERS)
+
+    store = FileControlStateStore(tmp_path)
+
+    assert store.get_downloaded_books() == {BOOK_ID}
+    assert store.get_indexed_books() == {BOOK_ID}
+    assert store.get_failure_counts() == {5: 1}
+
+
+def test_previous_failure_lines_stay_intact_after_a_new_failure(tmp_path: Path) -> None:
+    store = FileControlStateStore(tmp_path)
+    store.record_failure(BOOK_ID, FailureReason.HTTP_ERROR)
+    first_write = (tmp_path / "control" / "failed_books.txt").read_bytes()
+
+    store.record_failure(5, FailureReason.HTTP_ERROR)
+
+    assert (tmp_path / "control" / "failed_books.txt").read_bytes() == first_write + b"5;HTTP_ERROR;1\n"
