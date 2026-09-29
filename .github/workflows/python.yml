@@ -15,6 +15,16 @@ on:
 jobs:
   checks:
     runs-on: ubuntu-latest
+    services:
+      mongodb:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ping: 1})'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     defaults:
       run:
         working-directory: Query_Tarantino_Python
@@ -40,4 +50,4 @@ jobs:
         run: mypy src tests
 
       - name: Tests
-        run: pytest
+        run: pytest -rs

@@ -1,25 +1,56 @@
+"""
+Inverted index stored as one text file per term, grouped in folders by the
+term's first letter in uppercase (SPEC 7.3): HierarchicalFolderAdapter appends
+to it and FolderPostingsReader reads it for searches.
+"""
+
 from pathlib import Path
 
 from src.domain.model import TermOccurrences
+from src.infrastructure.data_layout import DATAMARTS_FOLDER
+from src.infrastructure.file_writes import append_line
+
+INDEX_FOLDER = "inverted_index"
+
+_TERM_FILE_SUFFIX = ".txt"
+_FIELD_SEPARATOR = " "
+
+
+def _term_file(index_dir: Path, term: str) -> Path:
+    return index_dir / term[0].upper() / f"{term}{_TERM_FILE_SUFFIX}"
 
 
 class HierarchicalFolderAdapter:
-    """
-    Implementation of InvertedIndexStorage that stores each term in its own
-    text file, grouped in folders by the first letter (SPEC 7.3).
-    """
+    """Implementation of InvertedIndexStorage: appends one "book_id tf" line per term (SPEC 7.3)."""
 
     def __init__(self, data_dir: Path) -> None:
-        self._index_dir = data_dir / "datamarts" / "inverted_index"
+        self._index_dir = data_dir / DATAMARTS_FOLDER / INDEX_FOLDER
 
     def write_book_terms(self, book_id: int, terms: dict[str, TermOccurrences]) -> None:
+        """Letter folders are created once per call, before the terms are appended."""
+        for letter in {term[0].upper() for term in terms}:
+            (self._index_dir / letter).mkdir(parents=True, exist_ok=True)
         for term, occurrences in terms.items():
-            term_folder = self._index_dir / term[0].upper()
-            term_folder.mkdir(parents=True, exist_ok=True)
+            append_line(_term_file(self._index_dir, term), f"{book_id}{_FIELD_SEPARATOR}{occurrences.tf}")
 
-            file_path = term_folder / f"{term}.txt"
-            self._append_term_data(file_path, book_id, occurrences.tf)
 
-    def _append_term_data(self, file_path: Path, book_id: int, tf: int) -> None:
-        with file_path.open("a", encoding="utf-8", newline="") as file:
-            file.write(f"{book_id} {tf}\n")
+class FolderPostingsReader:
+    """Implementation of PostingsReader: one file per requested term; the last line of a book counts (SPEC 7.3)."""
+
+    def __init__(self, data_dir: Path) -> None:
+        self._index_dir = data_dir / DATAMARTS_FOLDER / INDEX_FOLDER
+
+    def read_postings(self, terms: list[str]) -> dict[str, dict[int, int]]:
+        """book_id -> tf for each requested term; a term without a file has no postings."""
+        return {term: _read_term_file(_term_file(self._index_dir, term)) for term in terms}
+
+
+def _read_term_file(path: Path) -> dict[int, int]:
+    postings: dict[int, int] = {}
+    if not path.is_file():
+        return postings
+    with path.open(encoding="utf-8", newline="") as file:
+        for line in file:
+            book_id_text, tf_text = line.rstrip("\n").split(_FIELD_SEPARATOR)
+            postings[int(book_id_text)] = int(tf_text)
+    return postings

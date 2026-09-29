@@ -104,3 +104,65 @@ class FakeControlStateStore:
 
     def get_failure_counts(self) -> dict[int, int]:
         return self.failures
+
+
+class FakePostingsReader:
+    def __init__(self, postings: dict[str, dict[int, int]]) -> None:
+        self.postings = postings
+        self.requested_terms: list[list[str]] = []
+
+    def read_postings(self, terms: list[str]) -> dict[str, dict[int, int]]:
+        self.requested_terms.append(terms)
+        return {term: self.postings.get(term, {}) for term in terms}
+
+
+class FakeBookCatalog:
+    def __init__(self, books: dict[int, Book], indexed_count: int) -> None:
+        self.books = books
+        self.indexed_count = indexed_count
+        self.count_calls = 0
+
+    def count_indexed_books(self) -> int:
+        self.count_calls += 1
+        return self.indexed_count
+
+    def get_books(self, book_ids: list[int]) -> dict[int, Book]:
+        return {book_id: self.books[book_id] for book_id in book_ids}
+
+
+class FakeRawTextSource:
+    def __init__(self, texts: dict[int, str]) -> None:
+        self.texts = texts
+        self.fetched: list[int] = []
+
+    def fetch_text(self, book_id: int) -> str:
+        self.fetched.append(book_id)
+        if book_id not in self.texts:
+            raise DownloadException(FailureReason.HTTP_ERROR)
+        return self.texts[book_id]
+
+
+class FakeCorpusStore:
+    def __init__(self, log: CallLog, selected: list[int] | None = None) -> None:
+        self.log = log
+        self.texts: dict[int, str] = {}
+        self.selected = list(selected or [])
+
+    def save_text(self, book_id: int, text: str) -> None:
+        self.log.record("save_text", book_id)
+        self.texts[book_id] = text
+
+    def record_selected(self, book_id: int) -> None:
+        self.log.record("record_selected", book_id)
+        self.selected.append(book_id)
+
+    def get_selected_books(self) -> list[int]:
+        return list(self.selected)
+
+
+class FakeTermStatistics:
+    def __init__(self, document_frequencies: dict[str, int]) -> None:
+        self.frequencies = document_frequencies
+
+    def document_frequencies(self) -> dict[str, int]:
+        return dict(self.frequencies)

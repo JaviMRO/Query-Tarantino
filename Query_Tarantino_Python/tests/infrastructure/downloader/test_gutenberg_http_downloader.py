@@ -1,5 +1,7 @@
-from typing import cast
-from unittest.mock import MagicMock
+import threading
+from collections.abc import Iterator
+from dataclasses import dataclass, field
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 import requests
@@ -8,124 +10,240 @@ from src.domain.model import BookText, DownloadException, FailureReason
 from src.infrastructure.downloader.gutenberg_http_downloader import GutenbergHttpDownloader
 
 BOOK_ID = 2701
+FIRST_PATH = "/cache/epub/2701/pg2701.txt"
+SECOND_PATH = "/files/2701/2701-0.txt"
+THIRD_PATH = "/files/2701/2701.txt"
 RAW_TEXT = (
-    "Title: Moby Dick\n"
-    "\n"
-    "*** START OF THE PROJECT GUTENBERG EBOOK MOBY DICK ***\n"
-    "Call me Ishmael.\n"
-    "*** END OF THE PROJECT GUTENBERG EBOOK MOBY DICK ***\n"
-    "License text"
+    b"Title: Moby Dick\r\n"
+    b"\r\n"
+    b"*** START OF THE PROJECT GUTENBERG EBOOK MOBY DICK ***\r\n"
+    b"Call me Ishmael.\r\n"
+    b"*** END OF THE PROJECT GUTENBERG EBOOK MOBY DICK ***\r\n"
+    b"License text"
 )
+SERVER_POLL_SECONDS = 0.01
+SECONDS_BETWEEN_REQUESTS = 1.0
+EXPECTED_TEXT = BookText("Title: Moby Dick", "Call me Ishmael.")
 
 
-def _response(status_code: int, content: bytes = b"") -> requests.Response:
-    response = MagicMock(spec=requests.Response)
-    response.status_code = status_code
-    response.content = content
-    return cast(requests.Response, response)
+@dataclass
+class Route:
+    status: int = 200
+    body: bytes = b""
+    location: str = ""
+    cuts_connection: bool = False
 
 
-def build(session: MagicMock) -> GutenbergHttpDownloader:
-    return GutenbergHttpDownloader(cast(requests.Session, session))
+@dataclass
+class GutenbergStub:
+    base_url: str = ""
+    routes: dict[str, Route] = field(default_factory=dict)
+    requested_paths: list[str] = field(default_factory=list)
+    user_agents: list[str] = field(default_factory=list)
 
 
-@pytest.fixture(autouse=True)
-def _no_rate_limit(monkeypatch: pytest.MonkeyPatch) -> None:
-    """These tests are about URL fallback and error handling, not timing (SPEC 3.2 is tested separately)."""
-    monkeypatch.setattr("src.infrastructure.downloader.gutenberg_http_downloader.time.sleep", lambda _seconds: None)
+class FakeTime:
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.sleeps: list[float] = []
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.now += seconds
 
 
-def test_first_url_success_downloads_and_splits() -> None:
-    session = MagicMock()
-    session.get.return_value = _response(200, RAW_TEXT.encode("utf-8"))
+def handler_for(stub: GutenbergStub) -> type[BaseHTTPRequestHandler]:
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            stub.requested_paths.append(self.path)
+            stub.user_agents.append(self.headers.get("User-Agent", ""))
+            route = stub.routes.get(self.path, Route(status=404))
+            if route.cuts_connection:
+                self.close_connection = True
+                return
+            self.send_response(route.status)
+            if route.location:
+                self.send_header("Location", route.location)
+            self.send_header("Content-Length", str(len(route.body)))
+            self.end_headers()
+            self.wfile.write(route.body)
 
-    result = build(session).download(BOOK_ID)
+        def log_message(self, format: str, *args: object) -> None:
+            pass
 
-    assert result == BookText("Title: Moby Dick", "Call me Ishmael.")
-    url = session.get.call_args.args[0]
-    assert url == f"https://www.gutenberg.org/cache/epub/{BOOK_ID}/pg{BOOK_ID}.txt"
-
-
-def test_falls_back_to_next_url_on_non_200() -> None:
-    session = MagicMock()
-    session.get.side_effect = [_response(404), _response(200, RAW_TEXT.encode("utf-8"))]
-
-    result = build(session).download(BOOK_ID)
-
-    assert result.body == "Call me Ishmael."
-    assert session.get.call_count == 2
-    second_url = session.get.call_args_list[1].args[0]
-    assert second_url == f"https://www.gutenberg.org/files/{BOOK_ID}/{BOOK_ID}-0.txt"
-
-
-def test_network_error_is_treated_as_a_failed_url_and_the_next_one_is_tried() -> None:
-    session = MagicMock()
-    session.get.side_effect = [requests.ConnectionError(), _response(200, RAW_TEXT.encode("utf-8"))]
-
-    result = build(session).download(BOOK_ID)
-
-    assert result.body == "Call me Ishmael."
-    assert session.get.call_count == 2
+    return Handler
 
 
-def test_all_three_urls_failing_raises_http_error() -> None:
-    session = MagicMock()
-    session.get.return_value = _response(404)
-
-    with pytest.raises(DownloadException) as excinfo:
-        build(session).download(BOOK_ID)
-
-    assert excinfo.value.reason == FailureReason.HTTP_ERROR
-    assert session.get.call_count == 3
-
-
-def test_request_uses_the_spec_user_agent_timeout_and_redirects() -> None:
-    session = MagicMock()
-    session.get.return_value = _response(200, RAW_TEXT.encode("utf-8"))
-
-    build(session).download(BOOK_ID)
-
-    _, kwargs = session.get.call_args
-    assert kwargs["headers"]["User-Agent"] == "QueryTarantino/1.0 (ULPGC Big Data student project)"
-    assert kwargs["timeout"] == 30
-    assert kwargs["allow_redirects"] is True
+@pytest.fixture
+def stub() -> Iterator[GutenbergStub]:
+    gutenberg = GutenbergStub()
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler_for(gutenberg))
+    threading.Thread(target=server.serve_forever, kwargs={"poll_interval": SERVER_POLL_SECONDS}, daemon=True).start()
+    gutenberg.base_url = f"http://127.0.0.1:{server.server_port}"
+    yield gutenberg
+    server.shutdown()
+    server.server_close()
 
 
-def test_missing_markers_propagates_as_no_markers() -> None:
-    session = MagicMock()
-    session.get.return_value = _response(200, b"no markers in this text")
-
-    with pytest.raises(DownloadException) as excinfo:
-        build(session).download(BOOK_ID)
-
-    assert excinfo.value.reason == FailureReason.NO_MARKERS
+@pytest.fixture
+def session() -> Iterator[requests.Session]:
+    with requests.Session() as http_session:
+        yield http_session
 
 
-def test_empty_body_propagates_as_empty_body() -> None:
-    session = MagicMock()
-    text = "*** START OF THE PROJECT GUTENBERG EBOOK X ***\n*** END OF THE PROJECT GUTENBERG EBOOK X ***"
-    session.get.return_value = _response(200, text.encode("utf-8"))
-
-    with pytest.raises(DownloadException) as excinfo:
-        build(session).download(BOOK_ID)
-
-    assert excinfo.value.reason == FailureReason.EMPTY_BODY
+def build(stub: GutenbergStub, session: requests.Session, fake_time: FakeTime | None = None) -> GutenbergHttpDownloader:
+    clock = fake_time or FakeTime()
+    return GutenbergHttpDownloader(session, stub.base_url, clock.monotonic, clock.sleep, SECONDS_BETWEEN_REQUESTS)
 
 
-def test_waits_at_least_one_second_between_requests(monkeypatch: pytest.MonkeyPatch) -> None:
-    sleeps: list[float] = []
-    monkeypatch.setattr(
-        "src.infrastructure.downloader.gutenberg_http_downloader.time.sleep",
-        lambda seconds: sleeps.append(seconds),
+def test_first_url_success_downloads_decodes_and_splits(stub: GutenbergStub, session: requests.Session) -> None:
+    stub.routes[FIRST_PATH] = Route(body=RAW_TEXT)
+
+    result = build(stub, session).download(BOOK_ID)
+
+    assert result == EXPECTED_TEXT
+    assert stub.requested_paths == [FIRST_PATH]
+
+
+def test_falls_back_to_the_second_url_on_404(stub: GutenbergStub, session: requests.Session) -> None:
+    stub.routes[SECOND_PATH] = Route(body=RAW_TEXT)
+
+    result = build(stub, session).download(BOOK_ID)
+
+    assert result == EXPECTED_TEXT
+    assert stub.requested_paths == [FIRST_PATH, SECOND_PATH]
+
+
+def test_all_three_urls_failing_raises_http_error(stub: GutenbergStub, session: requests.Session) -> None:
+    with pytest.raises(DownloadException) as raised:
+        build(stub, session).download(BOOK_ID)
+
+    assert raised.value.reason == FailureReason.HTTP_ERROR
+    assert stub.requested_paths == [FIRST_PATH, SECOND_PATH, THIRD_PATH]
+
+
+def test_a_cut_connection_counts_as_a_failed_url(stub: GutenbergStub, session: requests.Session) -> None:
+    stub.routes[FIRST_PATH] = Route(cuts_connection=True)
+    stub.routes[SECOND_PATH] = Route(body=RAW_TEXT)
+
+    assert build(stub, session).download(BOOK_ID) == EXPECTED_TEXT
+
+
+def test_an_unreachable_server_raises_http_error(session: requests.Session) -> None:
+    fake_time = FakeTime()
+    downloader = GutenbergHttpDownloader(
+        session, "http://127.0.0.1:9", fake_time.monotonic, fake_time.sleep, SECONDS_BETWEEN_REQUESTS
     )
-    times = iter([0.0, 0.2, 0.2])
-    monkeypatch.setattr(
-        "src.infrastructure.downloader.gutenberg_http_downloader.time.monotonic",
-        lambda: next(times),
+
+    with pytest.raises(DownloadException) as raised:
+        downloader.download(BOOK_ID)
+
+    assert raised.value.reason == FailureReason.HTTP_ERROR
+
+
+def test_redirects_are_followed(stub: GutenbergStub, session: requests.Session) -> None:
+    stub.routes[FIRST_PATH] = Route(status=302, location="/moved/pg2701.txt")
+    stub.routes["/moved/pg2701.txt"] = Route(body=RAW_TEXT)
+
+    assert build(stub, session).download(BOOK_ID) == EXPECTED_TEXT
+
+
+def test_every_request_sends_the_spec_user_agent(stub: GutenbergStub, session: requests.Session) -> None:
+    stub.routes[SECOND_PATH] = Route(body=RAW_TEXT)
+
+    build(stub, session).download(BOOK_ID)
+
+    assert stub.user_agents == ["QueryTarantino/1.0 (ULPGC Big Data student project)"] * 2
+
+
+def test_waits_one_second_between_the_starts_of_fallback_requests(
+    stub: GutenbergStub, session: requests.Session
+) -> None:
+    stub.routes[THIRD_PATH] = Route(body=RAW_TEXT)
+    fake_time = FakeTime()
+
+    build(stub, session, fake_time).download(BOOK_ID)
+
+    assert fake_time.sleeps == [1.0, 1.0]
+
+
+def test_waits_only_the_rest_of_the_second_between_books(stub: GutenbergStub, session: requests.Session) -> None:
+    stub.routes[FIRST_PATH] = Route(body=RAW_TEXT)
+    fake_time = FakeTime()
+    downloader = build(stub, session, fake_time)
+    downloader.download(BOOK_ID)
+    fake_time.now += 0.25
+
+    downloader.download(BOOK_ID)
+
+    assert fake_time.sleeps == [0.75]
+
+
+def test_does_not_wait_when_a_second_has_already_passed(stub: GutenbergStub, session: requests.Session) -> None:
+    stub.routes[FIRST_PATH] = Route(body=RAW_TEXT)
+    fake_time = FakeTime()
+    downloader = build(stub, session, fake_time)
+    downloader.download(BOOK_ID)
+    fake_time.now += 2.0
+
+    downloader.download(BOOK_ID)
+
+    assert fake_time.sleeps == []
+
+
+def test_missing_markers_propagates_as_no_markers(stub: GutenbergStub, session: requests.Session) -> None:
+    stub.routes[FIRST_PATH] = Route(body=b"no markers in this text")
+
+    with pytest.raises(DownloadException) as raised:
+        build(stub, session).download(BOOK_ID)
+
+    assert raised.value.reason == FailureReason.NO_MARKERS
+
+
+def test_empty_body_propagates_as_empty_body(stub: GutenbergStub, session: requests.Session) -> None:
+    stub.routes[FIRST_PATH] = Route(
+        body=b"*** START OF THE PROJECT GUTENBERG EBOOK X ***\n \n*** END OF THE PROJECT GUTENBERG EBOOK X ***"
     )
-    session = MagicMock()
-    session.get.side_effect = [_response(404), _response(200, RAW_TEXT.encode("utf-8"))]
 
-    build(session).download(BOOK_ID)
+    with pytest.raises(DownloadException) as raised:
+        build(stub, session).download(BOOK_ID)
 
-    assert sleeps == [pytest.approx(0.8)]
+    assert raised.value.reason == FailureReason.EMPTY_BODY
+
+
+def test_invalid_utf8_is_decoded_as_latin1_without_bom(stub: GutenbergStub, session: requests.Session) -> None:
+    stub.routes[FIRST_PATH] = Route(body=RAW_TEXT.replace(b"Ishmael", b"Isma\xebl"))
+
+    result = build(stub, session).download(BOOK_ID)
+
+    assert result.body == "Call me Ismaël."
+
+
+def test_fetch_text_returns_the_whole_normalized_text_without_splitting(
+    stub: GutenbergStub, session: requests.Session
+) -> None:
+    stub.routes[FIRST_PATH] = Route(body=b"\xef\xbb\xbf" + RAW_TEXT)
+
+    text = build(stub, session).fetch_text(BOOK_ID)
+
+    assert text == RAW_TEXT.decode("utf-8").replace("\r\n", "\n")
+
+
+def test_a_longer_wait_between_requests_can_be_configured(stub: GutenbergStub, session: requests.Session) -> None:
+    stub.routes[SECOND_PATH] = Route(body=RAW_TEXT)
+    fake_time = FakeTime()
+    downloader = GutenbergHttpDownloader(session, stub.base_url, fake_time.monotonic, fake_time.sleep, 2.0)
+
+    downloader.download(BOOK_ID)
+
+    assert fake_time.sleeps == [2.0]
+
+
+def test_a_wait_below_one_second_is_rejected(session: requests.Session) -> None:
+    fake_time = FakeTime()
+
+    with pytest.raises(ValueError):
+        GutenbergHttpDownloader(session, "http://127.0.0.1:9", fake_time.monotonic, fake_time.sleep, 0.5)

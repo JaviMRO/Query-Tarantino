@@ -1,0 +1,9 @@
+"""Names of the top-level folders under TARANTINO_DATA_DIR (SPEC 4.1, 5.4, 7, 8, 13.1)."""
+
+TIME_LAKE_FOLDER = "datalake"
+BOOK_LAKE_FOLDER = "datalake_book"
+BATCH_LAKE_FOLDER = "datalake_batch"
+DATAMARTS_FOLDER = "datamarts"
+CONTROL_FOLDER = "control"
+
+TMP_CLEANUP_FOLDERS = (TIME_LAKE_FOLDER, BOOK_LAKE_FOLDER, BATCH_LAKE_FOLDER, DATAMARTS_FOLDER)

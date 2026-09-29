@@ -9,6 +9,7 @@ adaptadores concretos (SQLite, MongoDB, JSON, HTTP).
 ## Requisitos
 
 - Python 3.10+
+- MongoDB, solo para `--index mongo` (sus tests se saltan si no hay servidor en `localhost:27017`).
 
 ## Instalación de dependencias
 
@@ -24,10 +25,20 @@ Desde `Query_Tarantino_Python/`, las mismas que ejecuta el CI en cada push:
 
 ```bash
 ruff check .          # errores y estilo (ruff check . --fix corrige lo automático)
-ruff format .         # formatea el código
+ruff format --check . # formato (ruff format . lo aplica)
 mypy src tests        # tipos: los adapters cumplen los ports
 python -m pytest      # tests
 ```
+
+Tests opcionales contra gutenberg.org real (unas 8 peticiones; nunca en el CI de cada push, porque Gutenberg
+bloquea a los robots que abusan):
+
+```bash
+TARANTINO_LIVE_TESTS=1 python -m pytest tests/live
+```
+
+Los tests de MongoDB se saltan si no hay servidor en `localhost:27017`; en el CI se ejecutan contra un contenedor
+`mongo:7`.
 
 La configuración está en `pyproject.toml` y el CI en `.github/workflows/python.yml`.
 
@@ -35,18 +46,49 @@ La configuración está en `pyproject.toml` y el CI en `.github/workflows/python
 
 ## Ejecución
 
+Desde `Query_Tarantino_Python/`, la CLI de la SPEC 10:
+
 ```bash
-python -m src.infrastructure.entrypoints.<futuro_entrypoint>
+python -m tarantino download 1342 --shared-dir ../shared
+python -m tarantino index 1342 --shared-dir ../shared
+python -m tarantino step [--ids FICHERO] --shared-dir ../shared
+python -m tarantino run --steps K [--ids FICHERO] --shared-dir ../shared
+python -m tarantino search "TEXTO" [--json] --shared-dir ../shared
 ```
+
+Cada opción de la SPEC 2 (`--data-dir`, `--lake`, `--index`, `--downloader`, `--corpus-dir`, `--mongo-url`,
+`--shared-dir`) puede ir antes o después del comando y gana a su variable `TARANTINO_*`. Códigos de salida: `0`
+éxito, `1` uso incorrecto, `2` error de ejecución. La tabla completa de configuración y el procedimiento de la
+comprobación de equivalencia están en el `README.md` de la raíz.
+
+Ejemplo sobre el corpus local, sin red:
+
+```bash
+python -m tarantino run --steps 40 --ids ../shared/book_ids_benchmark.txt \
+    --downloader local --corpus-dir ../shared/sample_dataset --shared-dir ../shared
+python -m tarantino search "white whale" --json --shared-dir ../shared
+```
+
+## Datos compartidos del benchmark
+
+`corpus_tools build-corpus` y `build-queries` crean una única vez `shared/book_ids_benchmark.txt`,
+`shared/sample_dataset/` y `shared/queries.txt` (SPEC 1.1, 1.2). El procedimiento está en el `README.md` de la raíz.
 
 ## Estructura
 
 ```
 src/
-├── domain/            # reglas de la SPEC (tokenizer, parser, split) y ports (Protocol)
-├── application/       # casos de uso (orquestación)
-└── infrastructure/    # adaptadores concretos + entrypoints (futuro CLI)
-tests/                 # misma estructura que src/
+├── domain/                # modelos, ports (Protocol) y búsqueda TF-IDF
+│   └── text_processing/   # decodificación, split, tokenizer y parser del header (SPEC 3, 5, 6)
+├── application/           # ControlPipeline (paso de control)
+│   ├── use_cases/         # ingesta, indexado y búsqueda
+│   └── corpus/            # selección del corpus y generación de queries (SPEC 1.1, 1.2)
+└── infrastructure/        # adaptadores concretos, helpers de ficheros, lock y limpieza de .tmp
+    ├── datalake/layouts/  # time, book y batch
+    ├── corpus/            # corpus_raw/, lista de IDs y sample dataset
+    └── entrypoints/       # CLI (cli.py, settings.py), corpus_tools.py y wiring/ (comandos y composición)
+tarantino/                 # python -m tarantino
+tests/                     # misma estructura que src/, más live/ (peticiones reales opcionales)
 ```
 
 Las reglas compartidas por Python, Java y C++ están en `../shared/SPEC.md`.

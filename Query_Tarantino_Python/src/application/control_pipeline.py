@@ -1,3 +1,5 @@
+"""Control step decision (SPEC 8.1 steps 1-3) and the random candidates of a step without --ids."""
+
 import random
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -11,11 +13,15 @@ MAX_GUTENBERG_ID = 75_000
 
 @dataclass(frozen=True, slots=True)
 class IndexNext:
+    """The lowest book pending indexing goes first (SPEC 8.1 step 2)."""
+
     book_id: int
 
 
 @dataclass(frozen=True, slots=True)
 class DownloadNext:
+    """The first valid candidate is downloaded (SPEC 8.1 step 3)."""
+
     book_id: int
 
 
@@ -49,7 +55,7 @@ class ControlPipeline:
 
     def next_book_to_process(self, candidates: Iterable[int]) -> NextStep:
         """
-        candidates: the whole --ids file in its order (no limit), or
+        Next step of the pipeline. candidates: the whole --ids file in its order (no limit), or
         random_candidates() when there is no --ids file.
         """
         downloaded = self.control_store.get_downloaded_books()
