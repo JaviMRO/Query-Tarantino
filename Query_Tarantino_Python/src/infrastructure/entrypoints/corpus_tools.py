@@ -18,11 +18,16 @@ from src.application.corpus.build_benchmark_corpus_use_case import BuildBenchmar
 from src.application.corpus.generate_queries_use_case import QUERY_SEED, GenerateQueriesUseCase
 from src.infrastructure.corpus.file_corpus_store import (
     BENCHMARK_IDS_FILE,
+    QUERIES_FILE,
     SAMPLE_DATASET_FOLDER,
     FileCorpusStore,
     copy_sample_dataset,
 )
-from src.infrastructure.downloader.gutenberg_http_downloader import GUTENBERG_BASE_URL, GutenbergHttpDownloader
+from src.infrastructure.downloader.gutenberg_http_downloader import (
+    AUTOMATED_CLIENT_SECONDS_BETWEEN_REQUESTS,
+    GUTENBERG_BASE_URL,
+    GutenbergHttpDownloader,
+)
 from src.infrastructure.entrypoints.settings import SETTING_NAMES, Settings, option_flag, resolve_settings
 from src.infrastructure.entrypoints.wiring.commands import EXIT_OK, EXIT_RUNTIME_ERROR, EXIT_USAGE_ERROR
 from src.infrastructure.entrypoints.wiring.composition import open_metadata_database_read_only
@@ -32,8 +37,6 @@ from src.infrastructure.metadata.sqlite_metadata_adapter import SqliteBookCatalo
 
 PROGRAM_NAME = "corpus_tools"
 BENCHMARK_BOOK_COUNT = 1000
-QUERIES_FILE = "queries.txt"
-CORPUS_SECONDS_BETWEEN_REQUESTS = 2.0
 
 
 def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
@@ -60,7 +63,7 @@ def build_corpus(settings: Settings) -> int:
     """
     with requests.Session() as session:
         source = GutenbergHttpDownloader(
-            session, GUTENBERG_BASE_URL, time.monotonic, time.sleep, CORPUS_SECONDS_BETWEEN_REQUESTS
+            session, GUTENBERG_BASE_URL, time.monotonic, time.sleep, AUTOMATED_CLIENT_SECONDS_BETWEEN_REQUESTS
         )
         store = FileCorpusStore(settings.corpus_dir, settings.shared_dir / BENCHMARK_IDS_FILE)
         selected = BuildBenchmarkCorpusUseCase(source, store, BENCHMARK_BOOK_COUNT, _print_progress).execute()

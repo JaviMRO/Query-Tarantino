@@ -61,10 +61,12 @@ python -m tarantino step --shared-dir ../shared               # one control step
 python -m tarantino run --steps 40 --ids ../shared/book_ids_benchmark.txt --shared-dir ../shared
 python -m tarantino search "white whale" --shared-dir ../shared
 python -m tarantino search "white whale" --json --shared-dir ../shared
+python -m tarantino bench --experiment datalake --structure book --n 100 --run 1 --out ../benchmarks/results/python_datalake.csv \
+    --data-dir ../benchmarks/work --corpus-dir ../corpus_raw --shared-dir ../shared   # one benchmark run (SPEC 11)
 ```
 
 Exit codes: `0` success, `1` usage error, `2` runtime error (failed download, missing data, lock held…).
-`download`, `index`, `step` and `run` hold `control/.lock` while they run; if another process holds it they exit
+`download`, `index`, `step`, `run` and `bench` hold `control/.lock` while they run; if another process holds it they exit
 with code `2` and print its PID. If that process no longer exists, delete the file and run the command again.
 `search` never uses the lock.
 
@@ -92,21 +94,50 @@ python -m src.infrastructure.entrypoints.corpus_tools build-queries --data-dir .
 
 ## Sample dataset and equivalence check (SPEC 12)
 
-Process the 20 books of `shared/sample_dataset/` from scratch with the local downloader, the `time` datalake and
-the `json` index:
+`benchmarks/equivalence_check.sh` processes the 20 books of `shared/sample_dataset/` from scratch in every language
+(local downloader, `time` datalake, `json` index, `run --steps 40 --ids shared/book_ids_benchmark.txt`), runs the
+first 10 queries of `shared/queries.txt` with `search --json`, and compares the SHA-256 of `inverted_index.json`,
+the `books` tables without `header_path`, `body_path` and `indexed_at`, and the results: same books in the same
+order, with scores differing by at most `1e-6 + 1e-9`.
 
 ```bash
-cd Query_Tarantino_Python
-export TARANTINO_DATA_DIR=./data/equivalence TARANTINO_DOWNLOADER=local TARANTINO_CORPUS_DIR=../shared/sample_dataset \
-       TARANTINO_LAKE=time TARANTINO_INDEX=json TARANTINO_SHARED_DIR=../shared
-python -m tarantino run --steps 40 --ids ../shared/book_ids_benchmark.txt
-shasum -a 256 data/equivalence/datamarts/inverted_index.json
-head -n 10 ../shared/queries.txt | while read -r query; do python -m tarantino search "$query" --json; done
+source Query_Tarantino_Python/.venv/bin/activate
+export TARANTINO_JAVA_CMD="java -jar /absolute/path/to/tarantino.jar" TARANTINO_CPP_CMD="/absolute/path/to/tarantino"
+benchmarks/equivalence_check.sh                          # the three languages; exit code 1 on any mismatch
+BENCH_LANGUAGES=python benchmarks/equivalence_check.sh   # one language only: prints PARTIAL, compares nothing
 ```
 
-Then compare, across the three languages, the SHA-256 of `inverted_index.json`, the `books` table without
-`header_path`, `body_path` and `indexed_at`, and the output of the first 10 queries.
+Each language works in `benchmarks/work/equivalence/<language>/`, which is not versioned. The Python command
+defaults to `python -m tarantino`, run from `Query_Tarantino_Python/`; Java and C++ are run from their module folder.
 
 ## Benchmarks (SPEC 11)
 
-Maintained by the benchmarks owner in `benchmarks/`.
+Each module provides `tarantino bench --experiment E --structure S --n N --run R --out FILE.csv`, which runs one
+configuration of SPEC 11.1 inside `<TARANTINO_DATA_DIR>/bench/` (emptied at the start of every run; nothing else in
+the data folder is touched) and appends its rows to `FILE.csv` only if every validity check passed (exit code `2`
+otherwise). Every experiment except `download` reads the books with the local downloader, so `TARANTINO_CORPUS_DIR`
+must hold the whole corpus; `download` requests Gutenberg with 2 seconds between requests. MongoDB runs use the
+database `query_tarantino_bench`, never `query_tarantino`.
+
+The whole campaign, on one Linux machine (native or WSL2, with GNU `time` and GNU `du`) and with MongoDB running:
+
+```bash
+source Query_Tarantino_Python/.venv/bin/activate
+export TARANTINO_CORPUS_DIR="$PWD/corpus_raw" TARANTINO_JAVA_CMD="..." TARANTINO_CPP_CMD="..."
+benchmarks/run_all.sh                       # equivalence check, environment.txt, then rounds 0 to 5
+pip install -r benchmarks/requirements.txt  # pandas and matplotlib, for the analysis only
+python benchmarks/analyze.py                # tables and figures in benchmarks/report/
+benchmarks/run_all.sh 6 10 benchmarks/report/rerun_configurations.txt   # 5 extra rounds for flagged configurations
+```
+
+| File | Purpose |
+|---|---|
+| `benchmarks/run_all.sh` | Runs the equivalence check, writes `results/environment.txt`, then every configuration of each round in the order of `plan.py`; appends `peak_rss`, `disk_bytes_allocated` and `results/json_index_sha256.csv`, and validates the CSV files |
+| `benchmarks/plan.py` | `python benchmarks/plan.py --round R`: every configuration of SPEC 11.1 for the three languages, shuffled with `random.Random(R)`; `download` only in rounds 0 to 3 |
+| `benchmarks/equivalence_check.sh` | SPEC 12, described above |
+| `benchmarks/analyze.py` | SPEC 11.9: medians and interquartile ranges, flagged configurations (coefficient of variation over 10 %), summary tables with the speedup relative to Python, log-log scalability with slopes, build breakdown, query latency, memory over the baseline and the cross-run validity checks (exit code `1` if one fails) |
+| `benchmarks/scripts/` | `languages.sh` (how each module is run), `run_with_peak_rss.sh`, `compare_equivalence.py` and `validate_csv.py` (SPEC 11.8) |
+| `benchmarks/results/`, `benchmarks/report/` | Versioned: the CSV files and the generated tables and figures |
+
+`BENCH_LANGUAGES` (default `python java cpp`) limits the languages, for example to try the scripts while a module
+does not have `bench` yet; results measured that way are not a valid comparison.

@@ -7,12 +7,17 @@ pipeline and the benchmark can use different databases.
 
 from typing import TypedDict
 
-from pymongo import ASCENDING, ReplaceOne
+from pymongo import ASCENDING, MongoClient, ReplaceOne
 from pymongo.collection import Collection
 
 from src.domain.model import TermOccurrences
+from src.infrastructure.index.index_counts import IndexCounts
 
 POSTINGS_COLLECTION = "postings"
+
+_TERMS_FIELD = "terms"
+_COUNT_TERMS_PIPELINE: list[dict[str, object]] = [{"$group": {"_id": "$term"}}, {"$count": _TERMS_FIELD}]
+_STORAGE_STATS_PIPELINE: list[dict[str, object]] = [{"$collStats": {"storageStats": {}}}]
 
 
 class PostingDocument(TypedDict):
@@ -59,3 +64,22 @@ class MongoPostingsReader:
         for document in self._collection.find({"term": {"$in": terms}}, {"_id": 0, "term": 1, "book_id": 1, "tf": 1}):
             postings[document["term"]][document["book_id"]] = document["tf"]
         return postings
+
+
+def count_mongo_index(collection: Collection[PostingDocument]) -> IndexCounts:
+    """Distinct terms, grouped by the server, and documents, one per term-book pair (SPEC 7.2, 11.5.3 step 4)."""
+    reply = collection.database.command("aggregate", collection.name, pipeline=_COUNT_TERMS_PIPELINE, cursor={})
+    first_batch = reply["cursor"]["firstBatch"]
+    terms = int(first_batch[0][_TERMS_FIELD]) if first_batch else 0
+    return IndexCounts(terms, collection.count_documents({}))
+
+
+def mongo_disk_bytes(client: MongoClient[PostingDocument], collection: Collection[PostingDocument]) -> int:
+    """
+    storageSize + totalIndexSize of the collection, after the fsync admin command so that the data has reached
+    the disk; the size is compressed by MongoDB (SPEC 11.5.3 step 3).
+    """
+    client.admin.command("fsync")
+    reply = collection.database.command("aggregate", collection.name, pipeline=_STORAGE_STATS_PIPELINE, cursor={})
+    storage_stats = reply["cursor"]["firstBatch"][0]["storageStats"]
+    return int(storage_stats["storageSize"]) + int(storage_stats["totalIndexSize"])

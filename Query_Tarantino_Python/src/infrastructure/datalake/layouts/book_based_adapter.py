@@ -7,7 +7,7 @@ from pathlib import Path
 
 from src.domain.model import BookText, StoredPaths
 from src.infrastructure.data_layout import BOOK_LAKE_FOLDER
-from src.infrastructure.datalake.book_files import read_book_files, write_book_files
+from src.infrastructure.datalake.book_files import has_book_files, read_book_files, write_book_files
 
 
 class BookBasedAdapter:
@@ -28,5 +28,18 @@ class BookBasedAdapter:
 
     def get_paths(self, book_id: int) -> StoredPaths:
         """Derived from the id alone, without touching the disk."""
-        folder = f"{BOOK_LAKE_FOLDER}/{book_id}"
-        return StoredPaths(f"{folder}/header.txt", f"{folder}/body.txt")
+        return _book_paths(book_id)
+
+
+def stored_book_book_ids(data_dir: Path) -> set[int]:
+    """Ids of every complete book in the book lake, found by listing it (SPEC 11.5.1 detect_new_scan)."""
+    lake_dir = data_dir / BOOK_LAKE_FOLDER
+    if not lake_dir.is_dir():
+        return set()
+    candidates = (int(entry.name) for entry in lake_dir.iterdir() if entry.name.isdecimal())
+    return {book_id for book_id in candidates if has_book_files(data_dir, _book_paths(book_id))}
+
+
+def _book_paths(book_id: int) -> StoredPaths:
+    folder = f"{BOOK_LAKE_FOLDER}/{book_id}"
+    return StoredPaths(f"{folder}/header.txt", f"{folder}/body.txt")

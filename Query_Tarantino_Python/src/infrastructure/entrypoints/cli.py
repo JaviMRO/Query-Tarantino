@@ -10,6 +10,8 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 from src.application.use_cases.index_book_use_case import utc_now
+from src.infrastructure.entrypoints.bench import command as bench_command
+from src.infrastructure.entrypoints.bench.configuration import Experiment, parse_configuration
 from src.infrastructure.entrypoints.settings import SETTING_NAMES, Settings, option_flag, resolve_settings
 from src.infrastructure.entrypoints.wiring import commands
 from src.infrastructure.entrypoints.wiring.commands import EXIT_OK, EXIT_RUNTIME_ERROR, EXIT_USAGE_ERROR
@@ -47,8 +49,20 @@ def _dispatch(arguments: argparse.Namespace, settings: Settings) -> int:
             return _run_locked(settings, lambda: commands.run_steps(settings, 1, arguments.ids))
         case "run":
             return _run_locked(settings, lambda: commands.run_steps(settings, arguments.steps, arguments.ids))
+        case "bench":
+            return _bench(arguments, settings)
         case _:
             return commands.search(settings, arguments.text, arguments.as_json)
+
+
+def _bench(arguments: argparse.Namespace, settings: Settings) -> int:
+    """A combination outside SPEC 11.1 is a usage error, detected before taking the lock."""
+    try:
+        configuration = parse_configuration(arguments.experiment, arguments.structure, arguments.n, arguments.run)
+    except ValueError as error:
+        _print_error(str(error))
+        return EXIT_USAGE_ERROR
+    return _run_locked(settings, lambda: bench_command.bench(settings, configuration, arguments.out))
 
 
 def _run_locked(settings: Settings, command: Callable[[], int]) -> int:
@@ -82,7 +96,17 @@ def _build_parser() -> argparse.ArgumentParser:
     search = subcommands.add_parser("search", parents=[settings_options])
     search.add_argument("text")
     search.add_argument("--json", dest="as_json", action="store_true")
+    _add_bench_arguments(subcommands.add_parser("bench", parents=[settings_options]))
     return parser
+
+
+def _add_bench_arguments(bench: argparse.ArgumentParser) -> None:
+    """tarantino bench --experiment E --structure S --n N --run R --out FILE.csv (SPEC 10, 11.2)."""
+    bench.add_argument("--experiment", required=True, choices=[experiment.value for experiment in Experiment])
+    bench.add_argument("--structure", required=True)
+    bench.add_argument("--n", required=True, type=int)
+    bench.add_argument("--run", required=True, type=int)
+    bench.add_argument("--out", required=True, type=Path)
 
 
 def _settings_options() -> argparse.ArgumentParser:

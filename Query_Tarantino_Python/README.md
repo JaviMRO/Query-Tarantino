@@ -54,7 +54,14 @@ python -m tarantino index 1342 --shared-dir ../shared
 python -m tarantino step [--ids FICHERO] --shared-dir ../shared
 python -m tarantino run --steps K [--ids FICHERO] --shared-dir ../shared
 python -m tarantino search "TEXTO" [--json] --shared-dir ../shared
+python -m tarantino bench --experiment E --structure S --n N --run R --out FICHERO.csv --shared-dir ../shared
 ```
+
+`bench` ejecuta una configuración de la SPEC 11.1 dentro de `<TARANTINO_DATA_DIR>/bench/` y añade sus filas al CSV
+solo si pasan todas las comprobaciones de validez (código `2` si no). Su código está en
+`src/infrastructure/entrypoints/bench/`: `configuration.py` (combinaciones válidas), `bench_area.py`, `measurement/`
+(reloj, percentiles, almacenamiento y CSV) y `experiments/` (un módulo por experimento). La campaña completa la
+lanza `benchmarks/run_all.sh`, descrito en el `README.md` de la raíz.
 
 Cada opción de la SPEC 2 (`--data-dir`, `--lake`, `--index`, `--downloader`, `--corpus-dir`, `--mongo-url`,
 `--shared-dir`) puede ir antes o después del comando y gana a su variable `TARANTINO_*`. Códigos de salida: `0`
@@ -86,7 +93,7 @@ src/
 └── infrastructure/        # adaptadores concretos, helpers de ficheros, lock y limpieza de .tmp
     ├── datalake/layouts/  # time, book y batch
     ├── corpus/            # corpus_raw/, lista de IDs y sample dataset
-    └── entrypoints/       # CLI (cli.py, settings.py), corpus_tools.py y wiring/ (comandos y composición)
+    └── entrypoints/       # CLI (cli.py, settings.py), corpus_tools.py, wiring/ (comandos y composición) y bench/
 tarantino/                 # python -m tarantino
 tests/                     # misma estructura que src/, más live/ (peticiones reales opcionales)
 ```

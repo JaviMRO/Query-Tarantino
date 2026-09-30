@@ -1,7 +1,7 @@
 # SPEC · Shared rules for Stage 1
 
 **Project:** Query Tarantino · Big Data, ULPGC
-**Version:** 1.4 · 2026-09-29
+**Version:** 1.5 · 2026-09-29
 **Scope:** the three Stage 1 modules (`Query_Tarantino_Java`, `Query_Tarantino_Python`, `Query_Tarantino_Cpp`), the shared repository layout (section 15) and, from phase 2 onwards, the Java version.
 
 This document defines **what** each module must do, precisely enough for all three to produce exactly the same results. It does not say **how** to implement it: each language uses its own tools as long as it follows these rules.
@@ -36,7 +36,7 @@ Gutenberg IDs are traversed in ascending order starting at 1 and downloaded foll
 This selection is done by one person, only once. The downloaded corpus is stored locally (section 3.6) and everyone works from it.
 
 - It is done with the Python tool `python -m src.infrastructure.entrypoints.corpus_tools build-corpus`, which reuses the download, decoding, split and header rules of the pipeline.
-- Project Gutenberg reserves its website for human users and asks automated clients to wait 2 seconds between requests. This one-off selection therefore waits **2 seconds** between the starts of two requests, which satisfies section 3.2; the pipeline keeps the 1-second minimum.
+- Project Gutenberg reserves its website for human users and asks automated clients to wait 2 seconds between requests. This one-off selection therefore waits **2 seconds** between the starts of two requests, which satisfies section 3.2. The `download` benchmark (section 11.5.5) is automated too and also waits 2 seconds; the pipeline keeps the 1-second minimum.
 - A book's corpus file is written before its ID is appended to `book_ids_benchmark.txt`, so an interrupted selection resumes after the last listed ID.
 
 ### 1.2 How the queries are generated
@@ -92,7 +92,7 @@ If none returns 200, the book fails with reason `HTTP_ERROR`.
 - Maximum wait per request: 30 seconds.
 - **Network errors.** A timeout, or any other network error (DNS failure, connection refused or reset, TLS error, too many redirects), makes that URL count as failed, and the next one is tried. If it was the last URL, the book fails with `HTTP_ERROR`.
 - Redirects are followed. Some HTTP clients do not follow them by default and must be configured to do so.
-- Because of this limit, `http_throughput` can never exceed 1 book per second (section 11.5.5).
+- Because of this limit, `http_throughput` can never exceed 1 book per second; the `download` benchmark waits 2 seconds, so there it never exceeds 0.5 (section 11.5.5).
 
 ### 3.3 Decoding and normalization
 
@@ -435,7 +435,7 @@ score(d) = Σ over each query term t:  (1 + ln(tf(t, d))) × ln(1 + N / df(t))
 - Ordered by **score rounded to 9 decimals**, descending. Ties are broken by `book_id`, ascending. The rounded value is used, not the exact one, so that two mathematically equal scores that differ in the last bit are not ordered differently depending on the language.
 - Each result includes `book_id`, `title`, `author`, `language` and `score`, taken from the metadata.
 - `score` is displayed rounded to **6 decimals**, always with a decimal point, regardless of the system locale.
-- When comparing languages, unrounded scores are considered equal if they differ by less than `1e-6`.
+- When comparing languages, the displayed scores (already rounded to 6 decimals) are considered equal if they differ by at most `1e-6 + 1e-9` (section 12).
 
 ---
 
@@ -619,7 +619,7 @@ Measures the SQLite store of section 5.4 as the number of books grows, as recomm
 
 #### 11.5.5 `download`
 
-`IngestBookUseCase` with `HttpBookDownloader` and a `book` datalake, for the first 50 books of the list. **`http_throughput`** (`books_per_s`): 50 divided by the elapsed seconds, politeness waits included. The politeness rule of section 3.2 caps it at 1 book per second in every language, so it is reported but not used to compare languages. To limit the load on Project Gutenberg, it only runs in rounds 0 to 3 (section 11.6).
+`IngestBookUseCase` with `HttpBookDownloader` and a `book` datalake, for the first 50 books of the list. Like the corpus selection of section 1.1, it is an automated client, so it waits **2 seconds** between the starts of two requests, following Project Gutenberg's robot policy. **`http_throughput`** (`books_per_s`): 50 divided by the elapsed seconds, politeness waits included. The 2-second wait caps it at 0.5 books per second in every language, so it is reported but not used to compare languages. To limit the load on Project Gutenberg, it only runs in rounds 0 to 3 (section 11.6).
 
 #### 11.5.6 `baseline`
 
@@ -744,7 +744,7 @@ Before any measurement, and after any change to this document:
 1. Each module processes the 20 books in `sample_dataset/` from scratch with `TARANTINO_DOWNLOADER=local`, `TARANTINO_CORPUS_DIR=shared/sample_dataset`, `TARANTINO_LAKE=time` and `TARANTINO_INDEX=json`. For example, `tarantino run --steps 40 --ids shared/book_ids_benchmark.txt`: each downloaded book is indexed in the next step, so 40 steps process exactly the first 20 books.
 2. The three `inverted_index.json` files are compared by their SHA-256 hash. **They must be identical.**
 3. The `books` tables of the three SQLite files are compared, sorted by `book_id` and without the `header_path`, `body_path` and `indexed_at` columns (which depend on when the run happened). They must be identical.
-4. The first 10 queries of `queries.txt` are run with `tarantino search --json` in all three languages. Same books, in the same order, with scores differing by less than `1e-6`.
+4. The first 10 queries of `queries.txt` are run with `tarantino search --json` in all three languages. Same books, in the same order, with scores differing by at most `1e-6 + 1e-9`. The scores are already rounded to 6 decimals: two unrounded scores that differ only in the last bits can fall on both sides of a rounding boundary and end up exactly `1e-6` apart, and the extra `1e-9` absorbs the binary representation of that difference.
 
 If anything does not match, the difference is located and the implementation that deviates from this document is fixed. If the cause is an ambiguity in the document, the document is clarified following the procedure at the top.
 
@@ -783,7 +783,7 @@ Real parallelism arrives in phase 2, with MongoDB and PostgreSQL, which do suppo
 - Integers (`tf`, `df`, `N`) are converted to floating point **before** dividing. `N / df` with integers would perform integer division and give a wrong result.
 - Natural logarithm from the standard library: `Math.log` in Java, `math.log` in Python, `std::log` in C++.
 - The summands of section 9.3 are added in **alphabetical order of term**. In floating point, adding in a different order can change the last decimals.
-- Even so, each language's logarithm function may differ in the last bit. That is why ordering uses the score rounded to 9 decimals and cross-language comparison allows a difference of up to `1e-6` (section 9.4). With these two rules, such tiny differences never change the visible result.
+- Even so, each language's logarithm function may differ in the last bit. That is why ordering uses the score rounded to 9 decimals and cross-language comparison allows a difference of up to `1e-6 + 1e-9` (sections 9.4 and 12). With these two rules such tiny differences almost never change the visible result. The residual risk is a score that falls exactly on a rounding boundary: two books whose scores tie to 9 decimals in one language and not in another could swap places. It is accepted as extremely unlikely; if the equivalence check ever shows it, the case is documented in the report.
 
 How to display the score with 6 decimals and a decimal point on any system:
 
@@ -1044,7 +1044,7 @@ stage_1/
 
 The README is updated in the same pull request that changes any of these points.
 
-**Git history:** it must show the progression of the work. Small commits, one per change, and the history is never squashed or rewritten.
+**Git history:** it must show the progression of the work. The size of a commit does not matter, as long as its message explains everything it changes and why: what was added, changed or removed, and which sections of this document it covers. The history is never squashed or rewritten.
 
 **Report:** a single PDF, uploaded by one member of the group, with the structure required by the guide (cover page with the repository URL, introduction, architecture, design decisions, benchmarks, conclusions). Its benchmark section is built from `benchmarks/report/` (section 11.9) and discusses both the datalake structures and the inverted-index structures across the three languages. It justifies which datalake structure is chosen for the final implementation, and the deviations from the guide listed in this document (for example, section 7.2).
 
@@ -1059,3 +1059,4 @@ The README is updated in the same pull request that changes any of these points.
 | 1.2 | 2026-09-24 | Section 8.1 step 3: the limit of 10 candidates applies only to random IDs; with `--ids` the whole file is traversed; a step with no valid candidate downloads nothing |
 | 1.3 | 2026-09-28 | 3.2: politeness measured between request starts; any network error counts as a failed URL; redirects must be enabled where the client does not follow them. 4.3 and 13.1: `.tmp` leftovers deleted right after acquiring the lock; a command that cannot acquire the lock never deletes it. 4.1: rule for old copies of a book in the `time` datalake. 5.4: index on `title`. 7.1: book IDs converted to strings before sorting, with per-language notes. 9.3: `N` read from SQLite. 10: `bench` arguments. 11: benchmark methodology rewritten: experiments and configurations, bench area, measurement rules, simulated clock, exact definition of every metric, new `recovery` and `baseline` experiments, `metadata` experiment up to 50,000 rows, `run_all.sh` environment and order, validity checks, CSV format and analysis. 12: corpus folder and example command. 13.3: no forced flushes. 14.6 to 14.9: new cases. 15: repository and delivery requirements from the guide |
 | 1.4 | 2026-09-29 | 1.1: selection tool, 2-second wait between requests following Project Gutenberg's robot policy, resumable order of writes. 1.2: exact query generation rules (index, bands with integer limits, slot-to-band assignment, alphabetical candidates, sampling without replacement with seed 42, query format) |
+| 1.5 | 2026-09-29 | 3.2, 11.5.5 and 1.1: the `download` benchmark waits 2 seconds between requests, like the corpus selection. 9.4, 12 and 13.2: displayed scores compared with a tolerance of `1e-6 + 1e-9`; residual risk of a tie on a rounding boundary stated. 15: the size of a commit does not matter as long as its message explains every change |

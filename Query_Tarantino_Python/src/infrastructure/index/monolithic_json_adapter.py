@@ -9,6 +9,7 @@ from pathlib import Path
 from src.domain.model import TermOccurrences
 from src.infrastructure.data_layout import DATAMARTS_FOLDER
 from src.infrastructure.file_writes import atomic_text_writer
+from src.infrastructure.index.index_counts import IndexCounts
 
 INDEX_FILE = "inverted_index.json"
 
@@ -65,6 +66,12 @@ class JsonPostingsReader:
     def document_frequencies(self) -> dict[str, int]:
         """Implementation of TermStatistics: the number of books of every term (SPEC 1.2)."""
         return {term: len(postings) for term, postings in self._index.items()}
+
+
+def count_json_index(data_dir: Path) -> IndexCounts:
+    """Distinct terms and term-book pairs of the whole file (SPEC 11.5.3 step 4)."""
+    index = _read_index(json_index_path(data_dir))
+    return IndexCounts(len(index), sum(len(postings) for postings in index.values()))
 
 
 def _with_int_ids(postings: dict[str, int]) -> dict[int, int]:

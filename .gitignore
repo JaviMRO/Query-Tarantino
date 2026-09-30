@@ -1,5 +1,7 @@
 data/
 corpus_raw/
+benchmarks/work/
+build-release/
 mongo-data/
 *.sqlite
 *.sqlite3

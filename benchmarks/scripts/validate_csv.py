@@ -1,339 +1,122 @@
+"""
+Checks that every results CSV follows SPEC 11.8 exactly: header, columns, the combinations of SPEC 11.1, the
+metric-unit pairs and the six-decimal values.
+
+Usage: validate_csv.py RESULTS_DIR
+"""
+
 import csv
-import math
+import re
 import sys
 from pathlib import Path
 
-
-EXPECTED_HEADER = [
-    "language",
-    "experiment",
-    "structure",
-    "n_books",
-    "metric",
-    "value",
-    "unit",
-    "run",
-]
-
-VALID_LANGUAGES = {"java", "python", "cpp"}
-
-VALID_EXPERIMENTS = {
-    "datalake",
-    "index",
-    "download",
+HEADER = ["language", "experiment", "structure", "n_books", "metric", "value", "unit", "run"]
+LANGUAGES = {"java", "python", "cpp"}
+VALUE_PATTERN = re.compile(r"^-?[0-9]+\.[0-9]{6}$")
+OK_VALUES = {"0.000000", "1.000000"}
+NOT_RESULTS = {"json_index_sha256.csv"}
+CORPUS_SIZES = {100, 250, 500, 1000}
+GRID = {
+    "datalake": ({"time", "book", "batch"}, CORPUS_SIZES),
+    "recovery": ({"time", "book", "batch"}, CORPUS_SIZES),
+    "index": ({"json", "mongo", "folders"}, CORPUS_SIZES),
+    "metadata": ({"sqlite"}, {1000, 10000, 50000}),
+    "download": ({"none"}, {50}),
+    "baseline": ({"none"}, {0}),
 }
-
-VALID_STRUCTURES = {
-    "datalake": {
-        "time",
-        "book",
-        "batch",
-    },
-    "index": {
-        "json",
-        "mongo",
-        "folders",
-    },
-    "download": {
-        "none",
-    },
+RECOVERY_METRICS = {
+    f"{metric}_{scenario}": unit
+    for scenario in ("tmp_leftover", "data_without_control")
+    for metric, unit in (("recovery_time", "ms"), ("recovery_correct", "ok"), ("recovery_stale_copies", "count"))
 }
-
-VALID_METRICS = {
+METRICS = {
     "datalake": {
         "write_throughput": "books_per_s",
         "lookup_scan_mean": "ms",
         "lookup_metadata_mean": "ms",
-        "detect_new": "ms",
-        "recovery_correct": "ok",
-        "recovery_time": "ms",
+        "detect_new_control": "ms",
+        "detect_new_scan": "ms",
         "disk_bytes": "bytes",
+        "disk_bytes_allocated": "bytes",
         "file_count": "files",
         "dir_count": "dirs",
-        "peak_rss": "bytes",
     },
+    "recovery": RECOVERY_METRICS,
     "index": {
-        "build_time": "ms",
-        "query_mean": "ms",
-        "query_p95": "ms",
-        "update_50_time": "ms",
+        **{metric: "ms" for metric in ("build_time", "update_50_time", "index_write_time", "metadata_write_time")},
+        **{metric: "ms" for metric in ("lake_read_time", "open_time", "query_mean", "query_p50", "query_p95")},
+        **{metric: "ms" for metric in ("query_p99", "query_mean_t1", "query_mean_t2", "query_mean_t3")},
+        **{metric: "count" for metric in ("index_terms", "index_postings", "query_results_total")},
         "disk_bytes": "bytes",
-        "peak_rss": "bytes",
+        "disk_bytes_allocated": "bytes",
+        "file_count": "files",
+        "dir_count": "dirs",
     },
-    "download": {
-        "http_throughput": "books_per_s",
-        "peak_rss": "bytes",
+    "metadata": {
+        "insert_throughput": "rows_per_s",
+        "bulk_insert_throughput": "rows_per_s",
+        "query_author_mean": "ms",
+        "lookup_title_mean": "ms",
+        "lookup_id_mean": "ms",
+        "disk_bytes": "bytes",
     },
+    "download": {"http_throughput": "books_per_s"},
+    "baseline": {},
 }
-
-VALID_N_BOOKS = {100, 250, 500, 1000}
-
-# run=0 is warm-up.
-# Only runs 1, 2 and 3 are official measurements.
-VALID_RUNS = {1, 2, 3}
+ONLY_FOLDERS = {"file_count", "dir_count"}
+NOT_IN_MONGO = {"disk_bytes_allocated"}
 
 
-def fail(message: str) -> None:
-    print(f"ERROR: {message}", file=sys.stderr)
-    sys.exit(1)
+def row_errors(row: dict[str, str], language: str, experiment: str) -> list[str]:
+    """Everything wrong with one row of the file of that language and experiment."""
+    if row["language"] != language or row["experiment"] != experiment:
+        return [f"row of {row['language']}/{row['experiment']} in the file of {language}/{experiment}"]
+    structures, sizes = GRID[experiment]
+    metric, unit, value = row["metric"], row["unit"], row["value"]
+    expected_unit = "bytes" if metric == "peak_rss" else METRICS[experiment].get(metric)
+    checks = [
+        (row["structure"] in structures, f"structure {row['structure']!r}"),
+        (row["n_books"].isdecimal() and int(row["n_books"]) in sizes, f"n_books {row['n_books']!r}"),
+        (row["run"].isdecimal(), f"run {row['run']!r}"),
+        (expected_unit is not None, f"metric {metric!r}"),
+        (unit == expected_unit, f"unit {unit!r} for {metric}"),
+        (VALUE_PATTERN.match(value) is not None, f"value {value!r} without six decimals"),
+        (unit != "ok" or value in OK_VALUES, f"ok value {value!r}"),
+        (
+            metric not in ONLY_FOLDERS or experiment != "index" or row["structure"] == "folders",
+            f"{metric} outside folders",
+        ),
+        (metric not in NOT_IN_MONGO or row["structure"] != "mongo", f"{metric} in mongo"),
+    ]
+    return [message for is_valid, message in checks if not is_valid]
 
 
-def validate_value(
-    value: str,
-    metric: str,
-    line_number: int,
-) -> None:
-    if metric == "recovery_correct":
-        if value not in {"0.0", "1.0"}:
-            fail(
-                f"line {line_number}: recovery_correct "
-                f"must be 0.0 or 1.0, found '{value}'"
-            )
-        return
-
-    try:
-        numeric_value = float(value)
-    except ValueError:
-        fail(
-            f"line {line_number}: value must be numeric, "
-            f"found '{value}'"
-        )
-
-    if not math.isfinite(numeric_value):
-        fail(
-            f"line {line_number}: value must be finite, "
-            f"found '{value}'"
-        )
-
-    if "." not in value:
-        fail(
-            f"line {line_number}: value must contain "
-            f"a decimal point, found '{value}'"
-        )
+def file_errors(path: Path) -> list[str]:
+    """Errors of one results file, named {language}_{experiment}.csv (SPEC 11.8)."""
+    language, _, experiment = path.stem.partition("_")
+    if language not in LANGUAGES or experiment not in GRID:
+        return [f"{path.name}: not a {{language}}_{{experiment}}.csv name"]
+    with path.open(encoding="utf-8", newline="") as file:
+        reader = csv.DictReader(file)
+        if reader.fieldnames != HEADER:
+            return [f"{path.name}: header {reader.fieldnames}"]
+        return [
+            f"{path.name}:{line}: {error}"
+            for line, row in enumerate(reader, start=2)
+            for error in row_errors(row, language, experiment)
+        ]
 
 
-def validate_file(path: Path) -> None:
-    if not path.exists():
-        fail(f"file does not exist: {path}")
-
-    if not path.is_file():
-        fail(f"not a file: {path}")
-
-    seen_rows = set()
-    row_count = 0
-    languages = set()
-    experiments = set()
-
-    try:
-        with path.open(
-            "r",
-            encoding="utf-8",
-            newline="",
-        ) as file:
-
-            reader = csv.reader(file)
-
-            try:
-                header = next(reader)
-            except StopIteration:
-                fail("CSV is empty")
-
-            if header != EXPECTED_HEADER:
-                fail(
-                    "invalid CSV header\n"
-                    f"expected: {EXPECTED_HEADER}\n"
-                    f"found:    {header}"
-                )
-
-            for line_number, row in enumerate(reader, start=2):
-
-                row_count += 1
-
-                if len(row) != len(EXPECTED_HEADER):
-                    fail(
-                        f"line {line_number}: expected "
-                        f"{len(EXPECTED_HEADER)} columns, "
-                        f"found {len(row)}"
-                    )
-
-                (
-                    language,
-                    experiment,
-                    structure,
-                    n_books_text,
-                    metric,
-                    value,
-                    unit,
-                    run_text,
-                ) = row
-
-                if language not in VALID_LANGUAGES:
-                    fail(
-                        f"line {line_number}: invalid language "
-                        f"'{language}'"
-                    )
-
-                if experiment not in VALID_EXPERIMENTS:
-                    fail(
-                        f"line {line_number}: invalid experiment "
-                        f"'{experiment}'"
-                    )
-
-                languages.add(language)
-                experiments.add(experiment)
-
-                if structure not in VALID_STRUCTURES[experiment]:
-                    fail(
-                        f"line {line_number}: invalid "
-                        f"{experiment} structure "
-                        f"'{structure}'"
-                    )
-
-                metric_units = VALID_METRICS[experiment]
-
-                if metric not in metric_units:
-                    fail(
-                        f"line {line_number}: invalid metric "
-                        f"'{metric}' for experiment "
-                        f"'{experiment}'"
-                    )
-
-                expected_unit = metric_units[metric]
-
-                if unit != expected_unit:
-                    fail(
-                        f"line {line_number}: metric '{metric}' "
-                        f"requires unit '{expected_unit}', "
-                        f"found '{unit}'"
-                    )
-
-                try:
-                    n_books = int(n_books_text)
-                except ValueError:
-                    fail(
-                        f"line {line_number}: n_books "
-                        f"must be an integer"
-                    )
-
-                if n_books not in VALID_N_BOOKS:
-                    fail(
-                        f"line {line_number}: invalid n_books "
-                        f"'{n_books}'"
-                    )
-
-                validate_value(
-                    value,
-                    metric,
-                    line_number,
-                )
-
-                try:
-                    run = int(run_text)
-                except ValueError:
-                    fail(
-                        f"line {line_number}: run must be "
-                        f"an integer"
-                    )
-
-                if run not in VALID_RUNS:
-                    fail(
-                        f"line {line_number}: official results "
-                        f"must use run 1, 2 or 3; found '{run}'"
-                    )
-
-                row_key = (
-                    language,
-                    experiment,
-                    structure,
-                    n_books,
-                    metric,
-                    run,
-                )
-
-                if row_key in seen_rows:
-                    fail(
-                        f"line {line_number}: duplicate result "
-                        f"for {row_key}"
-                    )
-
-                seen_rows.add(row_key)
-
-            if row_count == 0:
-                fail("CSV contains only the header")
-
-    except UnicodeDecodeError as exc:
-        fail(f"file is not valid UTF-8: {exc}")
-
-    if len(languages) != 1:
-        fail(
-            "CSV must contain exactly one language, "
-            f"found: {sorted(languages)}"
-        )
-
-    if len(experiments) != 1:
-        fail(
-            "CSV must contain exactly one experiment, "
-            f"found: {sorted(experiments)}"
-        )
-
-    language = next(iter(languages))
-    experiment = next(iter(experiments))
-
-    expected_rows = (
-        len(VALID_STRUCTURES[experiment])
-        * len(VALID_N_BOOKS)
-        * len(VALID_RUNS)
-        * len(VALID_METRICS[experiment])
-    )
-
-    if row_count != expected_rows:
-        fail(
-            f"invalid number of result rows: "
-            f"expected {expected_rows}, "
-            f"found {row_count}"
-        )
-
-    for structure in VALID_STRUCTURES[experiment]:
-        for n_books in VALID_N_BOOKS:
-            for run in VALID_RUNS:
-                for metric in VALID_METRICS[experiment]:
-
-                    key = (
-                        language,
-                        experiment,
-                        structure,
-                        n_books,
-                        metric,
-                        run,
-                    )
-
-                    if key not in seen_rows:
-                        fail(
-                            "missing result for "
-                            f"language={language}, "
-                            f"experiment={experiment}, "
-                            f"structure={structure}, "
-                            f"n_books={n_books}, "
-                            f"metric={metric}, "
-                            f"run={run}"
-                        )
-
-    print(
-        f"OK: {path} "
-        f"({row_count} result rows)"
-    )
-
-
-def main() -> None:
-    if len(sys.argv) != 2:
-        print(
-            "Usage: python validate_csv.py <csv_file>",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
-    validate_file(Path(sys.argv[1]))
+def main(results_dir: Path) -> int:
+    paths = sorted(path for path in results_dir.glob("*.csv") if path.name not in NOT_RESULTS)
+    errors = [error for path in paths for error in file_errors(path)]
+    for error in errors:
+        print(f"ERROR: {error}", file=sys.stderr)
+    print(f"{len(paths)} results files checked, {len(errors)} errors")
+    return 1 if errors else 0
 
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) != 2:
+        raise SystemExit(__doc__)
+    raise SystemExit(main(Path(sys.argv[1])))

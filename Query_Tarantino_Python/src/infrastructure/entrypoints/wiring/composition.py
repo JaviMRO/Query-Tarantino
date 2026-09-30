@@ -6,7 +6,10 @@ ExitStack, which closes it when the command ends.
 
 import sqlite3
 import time
+from collections.abc import Callable
 from contextlib import ExitStack, closing
+from datetime import datetime
+from pathlib import Path
 
 import requests
 from pymongo import MongoClient
@@ -46,19 +49,22 @@ PIPELINE_DATABASE = "query_tarantino"
 
 _READ_ONLY_QUERY = "?mode=ro"
 
+PostingsOpener = Callable[[], Collection[PostingDocument]]
+
 
 def build_ingest_use_case(settings: Settings, resources: ExitStack) -> IngestBookUseCase:
     """Download and storage of one book, with the configured downloader and datalake."""
     downloader = _build_downloader(settings, resources)
-    return IngestBookUseCase(downloader, _build_datalake(settings), FileControlStateStore(settings.data_dir))
+    datalake = build_datalake(settings.lake, settings.data_dir, utc_now)
+    return IngestBookUseCase(downloader, datalake, FileControlStateStore(settings.data_dir))
 
 
 def build_index_use_case(settings: Settings, resources: ExitStack, stopwords: frozenset[str]) -> IndexBookUseCase:
     """Indexing of one book, with the configured datalake and index."""
     return IndexBookUseCase(
-        _build_datalake(settings),
-        SqliteMetadataAdapter(_open_metadata_database(settings, resources)),
-        _build_index_writer(settings, resources),
+        build_datalake(settings.lake, settings.data_dir, utc_now),
+        SqliteMetadataAdapter(open_metadata_database(metadata_database_path(settings.data_dir), resources)),
+        build_index_writer(settings.index, settings.data_dir, _pipeline_postings(settings, resources)),
         FileControlStateStore(settings.data_dir),
         stopwords,
     )
@@ -67,17 +73,59 @@ def build_index_use_case(settings: Settings, resources: ExitStack, stopwords: fr
 def build_search_use_case(settings: Settings, resources: ExitStack) -> SearchUseCase:
     """Opens the configured index and the metadata, read-only, for searches (SPEC 9)."""
     catalog = SqliteBookCatalog(open_metadata_database_read_only(settings, resources))
-    return SearchUseCase(_build_postings_reader(settings, resources), catalog, load_stopwords(settings.shared_dir))
+    reader = build_postings_reader(settings.index, settings.data_dir, _pipeline_postings(settings, resources))
+    return SearchUseCase(reader, catalog, load_stopwords(settings.shared_dir))
 
 
-def _build_datalake(settings: Settings) -> DatalakeStorage:
-    match settings.lake:
+def build_datalake(layout: LakeLayout, data_dir: Path, clock: Callable[[], datetime]) -> DatalakeStorage:
+    """The datalake structure under data_dir; only the time layout uses the clock (SPEC 4.1)."""
+    match layout:
         case LakeLayout.TIME:
-            return TimeBasedAdapter(settings.data_dir, utc_now)
+            return TimeBasedAdapter(data_dir, clock)
         case LakeLayout.BOOK:
-            return BookBasedAdapter(settings.data_dir)
+            return BookBasedAdapter(data_dir)
         case LakeLayout.BATCH:
-            return BatchBasedAdapter(settings.data_dir)
+            return BatchBasedAdapter(data_dir)
+
+
+def build_index_writer(layout: IndexLayout, data_dir: Path, open_postings: PostingsOpener) -> InvertedIndexStorage:
+    """The index structure under data_dir; the MongoDB collection is opened only when it is needed (SPEC 7)."""
+    match layout:
+        case IndexLayout.JSON:
+            return MonolithicJsonAdapter(data_dir)
+        case IndexLayout.MONGO:
+            return MongodbIndexAdapter(open_postings())
+        case IndexLayout.FOLDERS:
+            return HierarchicalFolderAdapter(data_dir)
+
+
+def build_postings_reader(layout: IndexLayout, data_dir: Path, open_postings: PostingsOpener) -> PostingsReader:
+    """The read side of the index structure; opening it is what a search pays once (SPEC 9, 11.5.3)."""
+    match layout:
+        case IndexLayout.JSON:
+            return JsonPostingsReader(data_dir)
+        case IndexLayout.MONGO:
+            return MongoPostingsReader(open_postings())
+        case IndexLayout.FOLDERS:
+            return FolderPostingsReader(data_dir)
+
+
+def open_metadata_database(path: Path, resources: ExitStack) -> sqlite3.Connection:
+    """Read-write metadata connection, closed with the caller's ExitStack; creates the file if missing."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return resources.enter_context(closing(sqlite3.connect(path)))
+
+
+def open_metadata_database_read_only(settings: Settings, resources: ExitStack) -> sqlite3.Connection:
+    """Read-only metadata connection: never creates or modifies the database; fails if nothing was indexed yet."""
+    uri = metadata_database_path(settings.data_dir).resolve().as_uri() + _READ_ONLY_QUERY
+    return resources.enter_context(closing(sqlite3.connect(uri, uri=True)))
+
+
+def open_mongo_client(mongo_url: str, resources: ExitStack) -> MongoClient[PostingDocument]:
+    """One client per process, closed with the caller's ExitStack."""
+    client: MongoClient[PostingDocument] = resources.enter_context(MongoClient(mongo_url))
+    return client
 
 
 def _build_downloader(settings: Settings, resources: ExitStack) -> BookDownloader:
@@ -91,38 +139,5 @@ def _build_downloader(settings: Settings, resources: ExitStack) -> BookDownloade
             return LocalCorpusDownloader(settings.corpus_dir)
 
 
-def _build_index_writer(settings: Settings, resources: ExitStack) -> InvertedIndexStorage:
-    match settings.index:
-        case IndexLayout.JSON:
-            return MonolithicJsonAdapter(settings.data_dir)
-        case IndexLayout.MONGO:
-            return MongodbIndexAdapter(_open_postings_collection(settings, resources))
-        case IndexLayout.FOLDERS:
-            return HierarchicalFolderAdapter(settings.data_dir)
-
-
-def _build_postings_reader(settings: Settings, resources: ExitStack) -> PostingsReader:
-    match settings.index:
-        case IndexLayout.JSON:
-            return JsonPostingsReader(settings.data_dir)
-        case IndexLayout.MONGO:
-            return MongoPostingsReader(_open_postings_collection(settings, resources))
-        case IndexLayout.FOLDERS:
-            return FolderPostingsReader(settings.data_dir)
-
-
-def _open_metadata_database(settings: Settings, resources: ExitStack) -> sqlite3.Connection:
-    path = metadata_database_path(settings.data_dir)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return resources.enter_context(closing(sqlite3.connect(path)))
-
-
-def open_metadata_database_read_only(settings: Settings, resources: ExitStack) -> sqlite3.Connection:
-    """Read-only metadata connection: never creates or modifies the database; fails if nothing was indexed yet."""
-    uri = metadata_database_path(settings.data_dir).resolve().as_uri() + _READ_ONLY_QUERY
-    return resources.enter_context(closing(sqlite3.connect(uri, uri=True)))
-
-
-def _open_postings_collection(settings: Settings, resources: ExitStack) -> Collection[PostingDocument]:
-    client: MongoClient[PostingDocument] = resources.enter_context(MongoClient(settings.mongo_url))
-    return client[PIPELINE_DATABASE][POSTINGS_COLLECTION]
+def _pipeline_postings(settings: Settings, resources: ExitStack) -> PostingsOpener:
+    return lambda: open_mongo_client(settings.mongo_url, resources)[PIPELINE_DATABASE][POSTINGS_COLLECTION]

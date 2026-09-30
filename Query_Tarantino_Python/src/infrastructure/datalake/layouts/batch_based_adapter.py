@@ -7,7 +7,12 @@ from pathlib import Path
 
 from src.domain.model import BookText, StoredPaths
 from src.infrastructure.data_layout import BATCH_LAKE_FOLDER
-from src.infrastructure.datalake.book_files import read_book_files, write_book_files
+from src.infrastructure.datalake.book_files import (
+    complete_book_ids_in,
+    paths_in_folder,
+    read_book_files,
+    write_book_files,
+)
 
 _BATCH_SIZE = 1000
 
@@ -32,5 +37,12 @@ class BatchBasedAdapter:
         """Derived from the id alone, without touching the disk (SPEC 14.4)."""
         range_start = (book_id // _BATCH_SIZE) * _BATCH_SIZE
         range_end = range_start + _BATCH_SIZE - 1
-        folder = f"{BATCH_LAKE_FOLDER}/{range_start:06d}-{range_end:06d}"
-        return StoredPaths(f"{folder}/{book_id}.header.txt", f"{folder}/{book_id}.body.txt")
+        return paths_in_folder(f"{BATCH_LAKE_FOLDER}/{range_start:06d}-{range_end:06d}", book_id)
+
+
+def stored_batch_book_ids(data_dir: Path) -> set[int]:
+    """Ids of every complete book in the batch lake, found by listing it (SPEC 11.5.1 detect_new_scan)."""
+    lake_dir = data_dir / BATCH_LAKE_FOLDER
+    if not lake_dir.is_dir():
+        return set()
+    return {book_id for batch in lake_dir.iterdir() for book_id in complete_book_ids_in(batch)}

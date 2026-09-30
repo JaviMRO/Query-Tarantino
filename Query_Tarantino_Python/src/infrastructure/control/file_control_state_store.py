@@ -10,7 +10,7 @@ from src.domain.model import FailureReason
 from src.infrastructure.data_layout import CONTROL_FOLDER
 from src.infrastructure.file_writes import append_line
 
-_DOWNLOADED_FILE = "downloaded_books.txt"
+DOWNLOADED_FILE = "downloaded_books.txt"
 _INDEXED_FILE = "indexed_books.txt"
 _FAILED_FILE = "failed_books.txt"
 _FIELD_SEPARATOR = ";"
@@ -25,7 +25,7 @@ class FileControlStateStore:
 
     def record_download(self, book_id: int) -> None:
         """Appends the id to downloaded_books.txt."""
-        append_line(self._control_dir / _DOWNLOADED_FILE, str(book_id))
+        append_line(self._control_dir / DOWNLOADED_FILE, str(book_id))
 
     def record_indexing(self, book_id: int) -> None:
         """Appends the id to indexed_books.txt."""
@@ -39,7 +39,7 @@ class FileControlStateStore:
 
     def get_downloaded_books(self) -> set[int]:
         """Ids in downloaded_books.txt; repeated lines change nothing."""
-        return {int(line) for line in self._read_lines(_DOWNLOADED_FILE)}
+        return {int(line) for line in self._read_lines(DOWNLOADED_FILE)}
 
     def get_indexed_books(self) -> set[int]:
         """Ids in indexed_books.txt; repeated lines change nothing."""

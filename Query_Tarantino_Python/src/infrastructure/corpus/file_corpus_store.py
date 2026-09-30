@@ -10,6 +10,7 @@ from pathlib import Path
 from src.infrastructure.file_writes import append_line, atomic_text_writer
 
 BENCHMARK_IDS_FILE = "book_ids_benchmark.txt"
+QUERIES_FILE = "queries.txt"
 SAMPLE_DATASET_FOLDER = "sample_dataset"
 SAMPLE_SIZE = 20
 
