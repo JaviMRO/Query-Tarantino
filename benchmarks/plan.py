@@ -37,6 +37,7 @@ def configurations(round_number: int) -> list[tuple[str, str, str, int]]:
 
 
 def main() -> None:
+    """Prints the configurations of the round given with --round, one per line."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--round", type=int, required=True, dest="round_number")
     for language, experiment, structure, n_books in configurations(parser.parse_args().round_number):

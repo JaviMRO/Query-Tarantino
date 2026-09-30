@@ -17,9 +17,9 @@ from src.infrastructure.corpus.file_corpus_store import QUERIES_FILE
 from src.infrastructure.datalake.layouts.book_based_adapter import BookBasedAdapter
 from src.infrastructure.downloader.local_corpus_downloader import LocalCorpusDownloader
 from src.infrastructure.entrypoints.bench.bench_area import (
-    BENCH_DATABASE,
     NEW_BOOKS,
     BenchContext,
+    MongoTarget,
     index_books,
     ingest_books,
 )
@@ -71,22 +71,26 @@ class _BuildPorts:
 
 
 def run_index(
-    context: BenchContext, layout: IndexLayout, stopwords: frozenset[str], mongo_url: str
+    context: BenchContext, layout: IndexLayout, stopwords: frozenset[str], mongo: MongoTarget
 ) -> list[Measurement]:
-    """Runs the six steps of SPEC 11.5.3 in order over a book datalake filled beforehand."""
+    """
+    Runs the six steps of SPEC 11.5.3 in order over a book datalake filled beforehand; the storage is measured
+    right after the build, before the index is opened for queries.
+    """
     with ExitStack() as resources:
-        index = _index_under_test(context.bench_dir, layout, mongo_url, resources)
+        index = _index_under_test(context.bench_dir, layout, mongo, resources)
         ingest = IngestBookUseCase(
             LocalCorpusDownloader(context.corpus_dir), BookBasedAdapter(context.bench_dir), _control(context)
         )
         ingest_books(ingest, context.book_ids)
         build = _build(context, index.writer, stopwords)
+        storage = index.storage()
         counts = index.counts()
-        opened = open_index(context, layout, mongo_url, resources)
+        opened = open_index(context, layout, mongo, resources)
         queries = query_measurements(context.clock, opened.result, _read_queries(context.shared_dir), stopwords)
         return [
             *build,
-            *index.storage(),
+            *storage,
             Measurement("index_terms", counts.terms, Unit.COUNT),
             Measurement("index_postings", counts.postings, Unit.COUNT),
             Measurement("open_time", milliseconds(opened.elapsed_ns), Unit.MS),
@@ -94,7 +98,7 @@ def run_index(
         ]
 
 
-def _index_under_test(data_dir: Path, layout: IndexLayout, mongo_url: str, resources: ExitStack) -> _IndexUnderTest:
+def _index_under_test(data_dir: Path, layout: IndexLayout, mongo: MongoTarget, resources: ExitStack) -> _IndexUnderTest:
     match layout:
         case IndexLayout.JSON:
             json_path = json_index_path(data_dir)
@@ -108,13 +112,13 @@ def _index_under_test(data_dir: Path, layout: IndexLayout, mongo_url: str, resou
                 partial(count_folder_index, data_dir),
             )
         case IndexLayout.MONGO:
-            return _mongo_under_test(open_mongo_client(mongo_url, resources))
+            return _mongo_under_test(open_mongo_client(mongo.url, resources), mongo.database)
 
 
-def _mongo_under_test(client: MongoClient[PostingDocument]) -> _IndexUnderTest:
+def _mongo_under_test(client: MongoClient[PostingDocument], database: str) -> _IndexUnderTest:
     """The bench database is dropped first, never query_tarantino (SPEC 11.2)."""
-    client.drop_database(BENCH_DATABASE)
-    collection: Collection[PostingDocument] = client[BENCH_DATABASE][POSTINGS_COLLECTION]
+    client.drop_database(database)
+    collection: Collection[PostingDocument] = client[database][POSTINGS_COLLECTION]
     return _IndexUnderTest(
         MongodbIndexAdapter(collection),
         partial(_mongo_storage, client, collection),

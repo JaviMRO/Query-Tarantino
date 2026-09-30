@@ -18,6 +18,8 @@ import pandas as pd
 BENCHMARKS_DIR = Path(__file__).resolve().parent
 SHA_FILE = "json_index_sha256.csv"
 RERUN_FILE = "rerun_configurations.txt"
+EXTRA_ROUNDS_FILE = "extra_rounds.md"
+COUNTED_ROUNDS = 5
 KEY = ["language", "experiment", "structure", "n_books", "metric", "unit"]
 CONFIGURATION = ["language", "experiment", "structure", "n_books"]
 TIME_UNITS = {"ms"}
@@ -48,6 +50,7 @@ def coefficient_of_variation(values: Sequence[float]) -> float:
 
 
 def load_results(results_dir: Path) -> pd.DataFrame:
+    """Every results CSV of the folder in one table; the JSON index fingerprints are left out."""
     frames = [pd.read_csv(path) for path in sorted(results_dir.glob("*.csv")) if path.name != SHA_FILE]
     if not frames:
         raise SystemExit(f"No results in {results_dir}")
@@ -84,6 +87,21 @@ def write_rerun_configurations(aggregated: pd.DataFrame, report_dir: Path) -> in
     return len(lines)
 
 
+def write_extra_rounds(results: pd.DataFrame, report_dir: Path) -> int:
+    """extra_rounds.md: the configurations measured in rounds after the 5 counted ones (SPEC 11.9 step 1)."""
+    extra = results[results["run"] > COUNTED_ROUNDS]
+    lines = ["# Configurations measured in extra rounds (SPEC 11.9)", ""]
+    configurations = 0
+    for key, group in extra.groupby(CONFIGURATION, sort=True):
+        rounds = ", ".join(str(round_number) for round_number in sorted(group["run"].unique()))
+        lines.append(f"- {' '.join(str(value) for value in key)}: rounds {rounds}")
+        configurations += 1
+    if not configurations:
+        lines.append("None: every configuration was stable in the 5 counted rounds.")
+    (report_dir / EXTRA_ROUNDS_FILE).write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return configurations
+
+
 def speedup(reference: float, candidate: float, unit: str) -> float:
     """Ratio of medians against Python, above 1 when the candidate is better (SPEC 11.9 step 2)."""
     if unit in THROUGHPUT_UNITS:
@@ -94,25 +112,24 @@ def speedup(reference: float, candidate: float, unit: str) -> float:
 def summary_table(experiment_rows: pd.DataFrame) -> list[str]:
     """Markdown rows: median [p25-p75] per language and structure, and the speedup relative to Python."""
     languages = sorted(experiment_rows["language"].unique())
-    lines = [
-        "| metric | unit | structure | "
-        + " | ".join(languages)
-        + " | "
-        + " | ".join(f"x {lang}" for lang in languages)
-        + " |",
-        "|" + "---|" * (3 + 2 * len(languages)),
-    ]
+    lines = _table_header(languages)
     for (metric, unit, structure), group in experiment_rows.groupby(["metric", "unit", "structure"], sort=True):
         by_language = group.set_index("language")
+        medians = dict(zip(group["language"].astype(str), group["median"].astype(float), strict=True))
         cells = [_median_with_range(by_language, lang) if lang in by_language.index else "-" for lang in languages]
         speedups = [
-            f"{speedup(by_language.at[REFERENCE_LANGUAGE, 'median'], by_language.at[lang, 'median'], unit):.2f}"
-            if lang in by_language.index and REFERENCE_LANGUAGE in by_language.index
+            f"{speedup(medians[REFERENCE_LANGUAGE], medians[lang], str(unit)):.2f}"
+            if lang in medians and REFERENCE_LANGUAGE in medians
             else "-"
             for lang in languages
         ]
         lines.append(f"| {metric} | {unit} | {structure} | " + " | ".join(cells + speedups) + " |")
     return lines
+
+
+def _table_header(languages: list[str]) -> list[str]:
+    columns = ["metric", "unit", "structure", *languages, *(f"x {language}" for language in languages)]
+    return ["| " + " | ".join(columns) + " |", "|" + "---|" * len(columns)]
 
 
 def _median_with_range(by_language: pd.DataFrame, language: str) -> str:
@@ -185,7 +202,8 @@ def medians_at_largest(aggregated: pd.DataFrame, experiment: str, metrics: list[
     if rows.empty:
         return pd.DataFrame()
     rows = rows[rows["n_books"] == rows["n_books"].max()]
-    return rows.pivot_table(index=["language", "structure"], columns="metric", values="median")
+    table: pd.DataFrame = rows.pivot_table(index=["language", "structure"], columns="metric", values="median")
+    return table
 
 
 def write_build_breakdown(aggregated: pd.DataFrame, report_dir: Path) -> None:
@@ -196,10 +214,8 @@ def write_build_breakdown(aggregated: pd.DataFrame, report_dir: Path) -> None:
     parts["processing"] = parts["build_time"] - parts[BUILD_PARTS].sum(axis=1)
     stacked = parts[[*BUILD_PARTS, "processing"]]
     stacked.to_csv(report_dir / "build_breakdown.csv")
-    axis = stacked.plot(kind="bar", stacked=True, figsize=(10, 5), ylabel="ms", title="build_time breakdown")
-    axis.figure.tight_layout()
-    axis.figure.savefig(report_dir / "build_breakdown.png", dpi=FIGURE_DPI)
-    plt.close(axis.figure)
+    stacked.plot(kind="bar", stacked=True, figsize=(10, 5), ylabel="ms", title="build_time breakdown")
+    _save_current_figure(report_dir / "build_breakdown.png")
 
 
 def write_query_latency(aggregated: pd.DataFrame, report_dir: Path) -> None:
@@ -212,15 +228,11 @@ def write_query_latency(aggregated: pd.DataFrame, report_dir: Path) -> None:
     lower = medians - rows.pivot_table(index=["language", "structure"], columns="metric", values="p25")
     upper = rows.pivot_table(index=["language", "structure"], columns="metric", values="p75") - medians
     errors = [[lower[metric].tolist(), upper[metric].tolist()] for metric in medians.columns]
-    axis = medians.plot(kind="bar", yerr=errors, figsize=(10, 5), ylabel="ms", title="query latency")
-    axis.figure.tight_layout()
-    axis.figure.savefig(report_dir / "query_latency.png", dpi=FIGURE_DPI)
-    plt.close(axis.figure)
+    medians.plot(kind="bar", yerr=errors, figsize=(10, 5), ylabel="ms", title="query latency")
+    _save_current_figure(report_dir / "query_latency.png")
     by_terms = medians_at_largest(aggregated, "index", QUERY_TERM_MEANS)
-    axis = by_terms.plot(kind="bar", figsize=(10, 5), ylabel="ms", title="query mean by number of terms")
-    axis.figure.tight_layout()
-    axis.figure.savefig(report_dir / "query_terms.png", dpi=FIGURE_DPI)
-    plt.close(axis.figure)
+    by_terms.plot(kind="bar", figsize=(10, 5), ylabel="ms", title="query mean by number of terms")
+    _save_current_figure(report_dir / "query_terms.png")
 
 
 def write_memory(aggregated: pd.DataFrame, report_dir: Path) -> None:
@@ -235,10 +247,16 @@ def write_memory(aggregated: pd.DataFrame, report_dir: Path) -> None:
     measured[columns].to_csv(report_dir / "memory.csv", index=False)
     largest = measured[measured["n_books"] == measured.groupby("experiment")["n_books"].transform("max")]
     table = largest.pivot_table(index=["experiment", "structure"], columns="language", values="over_baseline_bytes")
-    axis = table.plot(kind="bar", figsize=(10, 5), ylabel="bytes", title="peak_rss over baseline, largest N")
-    axis.figure.tight_layout()
-    axis.figure.savefig(report_dir / "memory.png", dpi=FIGURE_DPI)
-    plt.close(axis.figure)
+    table.plot(kind="bar", figsize=(10, 5), ylabel="bytes", title="peak_rss over baseline, largest N")
+    _save_current_figure(report_dir / "memory.png")
+
+
+def _save_current_figure(path: Path) -> None:
+    """Saves and closes the figure that the last pandas plot drew on."""
+    figure = plt.gcf()
+    figure.tight_layout()
+    figure.savefig(path, dpi=FIGURE_DPI)
+    plt.close(figure)
 
 
 def validity_problems(results: pd.DataFrame, results_dir: Path) -> list[str]:
@@ -247,7 +265,8 @@ def validity_problems(results: pd.DataFrame, results_dir: Path) -> list[str]:
     counts = results[(results["experiment"] == "index") & (results["metric"].isin(EQUAL_COUNTS))]
     for (n_books, metric), group in counts.groupby(["n_books", "metric"]):
         if group["value"].nunique() > 1:
-            problems.append(f"{metric} differs for n_books={n_books}: {sorted(float(value) for value in group['value'].unique())}")
+            values = sorted(float(value) for value in group["value"].unique())
+            problems.append(f"{metric} differs for n_books={n_books}: {values}")
     recovery = results[results["metric"].str.startswith("recovery_correct_")]
     for row in recovery[recovery["value"] != 1].itertuples(index=False):
         problems.append(f"{row.metric}=0 for {row.language} {row.structure} n_books={row.n_books} run={row.run}")
@@ -255,17 +274,20 @@ def validity_problems(results: pd.DataFrame, results_dir: Path) -> list[str]:
     if sha_path.is_file():
         for n_books, group in pd.read_csv(sha_path).groupby("n_books"):
             if group["sha256"].nunique() > 1:
-                problems.append(f"inverted_index.json differs across languages or runs for n_books={n_books}")
+                size = str(n_books)
+                problems.append(f"inverted_index.json differs across languages or runs for n_books={size}")
     return problems
 
 
 def write_validity(problems: list[str], report_dir: Path) -> None:
+    """validity.md: the problems found, or a line saying every cross-run check passed."""
     lines = ["# Validity (SPEC 11.7)", ""]
     lines += [f"- {problem}" for problem in problems] if problems else ["All cross-run checks passed."]
     (report_dir / "validity.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def main() -> int:
+    """Writes every table and figure of SPEC 11.9; exit code 1 if a cross-run validity check failed."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--results", type=Path, default=BENCHMARKS_DIR / "results")
     parser.add_argument("--report", type=Path, default=BENCHMARKS_DIR / "report")
@@ -274,17 +296,26 @@ def main() -> int:
     arguments.report.mkdir(parents=True, exist_ok=True)
     results = load_results(arguments.results)
     aggregated = aggregate(results)
-    aggregated.to_csv(arguments.report / "aggregated.csv", index=False)
     flagged = write_rerun_configurations(aggregated, arguments.report)
-    write_summaries(aggregated, arguments.report)
-    write_scalability(aggregated, arguments.report)
-    write_build_breakdown(aggregated, arguments.report)
-    write_query_latency(aggregated, arguments.report)
-    write_memory(aggregated, arguments.report)
+    extra = write_extra_rounds(results, arguments.report)
+    _write_tables_and_figures(aggregated, arguments.report)
     problems = validity_problems(results, arguments.results)
     write_validity(problems, arguments.report)
-    print(f"Report written to {arguments.report}: {flagged} configurations flagged, {len(problems)} validity problems")
+    print(
+        f"Report written to {arguments.report}: {flagged} configurations flagged, {extra} measured in extra rounds, "
+        f"{len(problems)} validity problems"
+    )
     return 1 if problems else 0
+
+
+def _write_tables_and_figures(aggregated: pd.DataFrame, report_dir: Path) -> None:
+    """SPEC 11.9 steps 2 to 6, from the aggregated medians."""
+    aggregated.to_csv(report_dir / "aggregated.csv", index=False)
+    write_summaries(aggregated, report_dir)
+    write_scalability(aggregated, report_dir)
+    write_build_breakdown(aggregated, report_dir)
+    write_query_latency(aggregated, report_dir)
+    write_memory(aggregated, report_dir)
 
 
 if __name__ == "__main__":

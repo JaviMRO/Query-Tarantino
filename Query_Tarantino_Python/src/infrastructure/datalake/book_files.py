@@ -42,8 +42,13 @@ def complete_book_ids_in(folder: Path) -> Iterator[int]:
         return
     for entry in folder.iterdir():
         book_id_text = entry.name.removesuffix(HEADER_FILE_SUFFIX)
-        if book_id_text != entry.name and (folder / f"{book_id_text}{BODY_FILE_SUFFIX}").is_file():
+        if _is_book_id(book_id_text) and (folder / f"{book_id_text}{BODY_FILE_SUFFIX}").is_file():
             yield int(book_id_text)
+
+
+def _is_book_id(text: str) -> bool:
+    """Only N.header.txt names count; any other file in a lake folder is not a book."""
+    return text.isascii() and text.isdecimal()
 
 
 def _read_exact_text(path: Path) -> str:

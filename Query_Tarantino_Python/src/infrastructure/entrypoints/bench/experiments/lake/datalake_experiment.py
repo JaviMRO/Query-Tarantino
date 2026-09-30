@@ -28,7 +28,7 @@ from src.infrastructure.entrypoints.bench.measurement.timing import (
     sample_positions,
     simulated_clock,
     timed,
-    warm_mean_ms,
+    warm_mean,
 )
 from src.infrastructure.entrypoints.settings import LakeLayout
 from src.infrastructure.entrypoints.wiring.composition import build_datalake, open_metadata_database
@@ -68,9 +68,9 @@ def _check_lake_holds_the_books(context: BenchContext, layout: LakeLayout) -> No
 def _lookup_scan_mean(context: BenchContext, datalake: DatalakeStorage, sample: list[int]) -> Measurement:
     """get_paths of the structure, then both files checked; neither control nor SQLite (SPEC 11.5.1 step 3)."""
     lookup_pass = partial(_count_found_by_structure, context.bench_dir, datalake, sample)
-    mean_ms = warm_mean_ms(context.clock, lookup_pass, LOOKUP_PASSES, LOOKUP_PASSES * len(sample))
-    check(lookup_pass() == len(sample), "a structure lookup did not find both files")
-    return Measurement("lookup_scan_mean", mean_ms, Unit.MS)
+    measured = warm_mean(context.clock, lookup_pass, LOOKUP_PASSES, LOOKUP_PASSES * len(sample))
+    check(all(found == len(sample) for found in measured.results), "a structure lookup did not find both files")
+    return Measurement("lookup_scan_mean", measured.mean_ms, Unit.MS)
 
 
 def _count_found_by_structure(data_dir: Path, datalake: DatalakeStorage, sample: list[int]) -> int:
@@ -83,9 +83,9 @@ def _lookup_metadata_mean(context: BenchContext, datalake: DatalakeStorage, samp
         connection = open_metadata_database(metadata_database_path(context.bench_dir), resources)
         _save_metadata(context.book_ids, datalake, SqliteMetadataAdapter(connection))
         lookup_pass = partial(_count_found_by_metadata, context.bench_dir, connection, sample)
-        mean_ms = warm_mean_ms(context.clock, lookup_pass, LOOKUP_PASSES, LOOKUP_PASSES * len(sample))
-        check(lookup_pass() == len(sample), "a metadata lookup did not find both files")
-    return Measurement("lookup_metadata_mean", mean_ms, Unit.MS)
+        measured = warm_mean(context.clock, lookup_pass, LOOKUP_PASSES, LOOKUP_PASSES * len(sample))
+    check(all(found == len(sample) for found in measured.results), "a metadata lookup did not find both files")
+    return Measurement("lookup_metadata_mean", measured.mean_ms, Unit.MS)
 
 
 def _save_metadata(book_ids: tuple[int, ...], datalake: DatalakeStorage, metadata: MetadataStorage) -> None:
@@ -104,9 +104,9 @@ def _count_found_by_metadata(data_dir: Path, connection: sqlite3.Connection, sam
 def _detect_new_control(context: BenchContext, control: FileControlStateStore) -> Measurement:
     """Downloaded minus indexed, read from the control files (SPEC 11.5.1 step 6)."""
     detection = partial(_pending_by_control, control)
-    mean_ms = warm_mean_ms(context.clock, detection, DETECT_REPETITIONS, DETECT_REPETITIONS)
-    check(detection() == set(context.book_ids[-NEW_BOOKS:]), "detect_new_control did not return the last 50 books")
-    return Measurement("detect_new_control", mean_ms, Unit.MS)
+    measured = warm_mean(context.clock, detection, DETECT_REPETITIONS, DETECT_REPETITIONS)
+    check(_all_return_the_new_books(context, measured.results), "detect_new_control did not return the last 50 books")
+    return Measurement("detect_new_control", measured.mean_ms, Unit.MS)
 
 
 def _pending_by_control(control: FileControlStateStore) -> set[int]:
@@ -120,9 +120,15 @@ def _detect_new_scan(
     indexed = control.get_indexed_books()
     checkpoint = checkpoint_of(layout, datalake, context.book_ids[-NEW_BOOKS - 1])
     detection = partial(_pending_by_scan, layout, context.bench_dir, checkpoint, indexed)
-    mean_ms = warm_mean_ms(context.clock, detection, DETECT_REPETITIONS, DETECT_REPETITIONS)
-    check(detection() == set(context.book_ids[-NEW_BOOKS:]), "detect_new_scan did not return the last 50 books")
-    return Measurement("detect_new_scan", mean_ms, Unit.MS)
+    measured = warm_mean(context.clock, detection, DETECT_REPETITIONS, DETECT_REPETITIONS)
+    check(_all_return_the_new_books(context, measured.results), "detect_new_scan did not return the last 50 books")
+    return Measurement("detect_new_scan", measured.mean_ms, Unit.MS)
+
+
+def _all_return_the_new_books(context: BenchContext, detections: list[set[int]]) -> bool:
+    """Every measured detection returned exactly the last 50 books of the configuration (SPEC 11.7)."""
+    new_books = set(context.book_ids[-NEW_BOOKS:])
+    return all(detected == new_books for detected in detections)
 
 
 def _pending_by_scan(layout: LakeLayout, data_dir: Path, checkpoint: str, indexed: set[int]) -> set[int]:

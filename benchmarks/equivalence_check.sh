@@ -17,7 +17,7 @@ process_sample() {
     run_tarantino "${language}" env \
         TARANTINO_DATA_DIR="${data_dir}" TARANTINO_DOWNLOADER=local TARANTINO_CORPUS_DIR="${SAMPLE_DIR}" \
         TARANTINO_LAKE=time TARANTINO_INDEX=json TARANTINO_SHARED_DIR="${SHARED_DIR}" \
-        -- run --steps "${STEPS}" --ids "${BOOK_IDS_FILE}" > "${data_dir}/run.log"
+        -- run --steps "${STEPS}" --ids "${BOOK_IDS_FILE}" > "${data_dir}/run.log" < /dev/null
 }
 
 run_queries() {
@@ -27,7 +27,7 @@ run_queries() {
     echo "== ${language}: first ${COMPARED_QUERIES} queries"
     head -n "${COMPARED_QUERIES}" "${QUERIES_FILE}" | while IFS= read -r query; do
         run_tarantino "${language}" env TARANTINO_DATA_DIR="${data_dir}" TARANTINO_INDEX=json \
-            TARANTINO_SHARED_DIR="${SHARED_DIR}" -- search "${query}" --json
+            TARANTINO_SHARED_DIR="${SHARED_DIR}" -- search "${query}" --json < /dev/null
     done > "${data_dir}/search_results.jsonl"
 }
 
@@ -41,7 +41,9 @@ main() {
         process_sample "${language}"
         run_queries "${language}"
     done
-    python3 "${BENCHMARKS_DIR}/scripts/compare_equivalence.py" "${WORK_DIR}" ${LANGUAGES}
+    local compared_languages
+    read -r -a compared_languages <<< "${LANGUAGES}"
+    python3 "${BENCHMARKS_DIR}/scripts/compare_equivalence.py" "${WORK_DIR}" "${compared_languages[@]}"
 }
 
 main "$@"

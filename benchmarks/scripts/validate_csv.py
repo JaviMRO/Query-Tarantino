@@ -1,6 +1,6 @@
 """
 Checks that every results CSV follows SPEC 11.8 exactly: header, columns, the combinations of SPEC 11.1, the
-metric-unit pairs and the six-decimal values.
+metric-unit pairs and the six-decimal values, and that every run has each of its metrics exactly once.
 
 Usage: validate_csv.py RESULTS_DIR
 """
@@ -8,6 +8,7 @@ Usage: validate_csv.py RESULTS_DIR
 import csv
 import re
 import sys
+from collections import Counter
 from pathlib import Path
 
 HEADER = ["language", "experiment", "structure", "n_books", "metric", "value", "unit", "run"]
@@ -65,6 +66,33 @@ METRICS = {
 }
 ONLY_FOLDERS = {"file_count", "dir_count"}
 NOT_IN_MONGO = {"disk_bytes_allocated"}
+PEAK_RSS = "peak_rss"
+RUN_KEY = ("structure", "n_books", "run")
+
+
+def expected_metrics(experiment: str, structure: str) -> set[str]:
+    """Metrics of one run: those of the program and those added by run_all.sh (SPEC 11.6, 11.8)."""
+    metrics = set(METRICS[experiment]) | {PEAK_RSS}
+    if experiment == "index" and structure != "folders":
+        metrics -= ONLY_FOLDERS
+    if experiment == "index" and structure == "mongo":
+        metrics -= NOT_IN_MONGO
+    return metrics
+
+
+def run_errors(rows: list[dict[str, str]], experiment: str) -> list[str]:
+    """Runs with a missing or repeated metric; a run is one structure, n_books and round."""
+    runs: dict[tuple[str, ...], Counter[str]] = {}
+    for row in rows:
+        runs.setdefault(tuple(row[field] for field in RUN_KEY), Counter())[row["metric"]] += 1
+    errors = []
+    for (structure, n_books, run), counts in sorted(runs.items()):
+        missing = expected_metrics(experiment, structure) - set(counts)
+        repeated = sorted(metric for metric, count in counts.items() if count > 1)
+        name = f"{structure} n_books={n_books} run={run}"
+        errors += [f"{name}: missing {metric}" for metric in sorted(missing)]
+        errors += [f"{name}: {metric} appears more than once" for metric in repeated]
+    return errors
 
 
 def row_errors(row: dict[str, str], language: str, experiment: str) -> list[str]:
@@ -97,17 +125,26 @@ def file_errors(path: Path) -> list[str]:
     if language not in LANGUAGES or experiment not in GRID:
         return [f"{path.name}: not a {{language}}_{{experiment}}.csv name"]
     with path.open(encoding="utf-8", newline="") as file:
-        reader = csv.DictReader(file)
-        if reader.fieldnames != HEADER:
-            return [f"{path.name}: header {reader.fieldnames}"]
-        return [
-            f"{path.name}:{line}: {error}"
-            for line, row in enumerate(reader, start=2)
-            for error in row_errors(row, language, experiment)
-        ]
+        lines = list(csv.reader(file))
+    if not lines or lines[0] != HEADER:
+        return [f"{path.name}: header {lines[0] if lines else None}"]
+    rows = [dict(zip(HEADER, fields, strict=True)) for fields in lines[1:] if len(fields) == len(HEADER)]
+    errors = [
+        f"{path.name}:{line}: {len(fields)} fields instead of {len(HEADER)}"
+        for line, fields in enumerate(lines[1:], start=2)
+        if len(fields) != len(HEADER)
+    ]
+    errors += [
+        f"{path.name}:{line}: {error}"
+        for line, fields in enumerate(lines[1:], start=2)
+        if len(fields) == len(HEADER)
+        for error in row_errors(dict(zip(HEADER, fields, strict=True)), language, experiment)
+    ]
+    return errors + [f"{path.name}: {error}" for error in run_errors(rows, experiment)]
 
 
 def main(results_dir: Path) -> int:
+    """Checks every results CSV of the folder; exit code 1 if any error was found."""
     paths = sorted(path for path in results_dir.glob("*.csv") if path.name not in NOT_RESULTS)
     errors = [error for path in paths for error in file_errors(path)]
     for error in errors:

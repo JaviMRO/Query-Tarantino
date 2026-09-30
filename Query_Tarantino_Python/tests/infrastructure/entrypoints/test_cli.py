@@ -200,3 +200,16 @@ def test_a_step_with_no_valid_candidate_does_nothing(workspace: Path, capsys: py
 
 def test_searching_before_indexing_is_a_runtime_error(workspace: Path) -> None:
     assert main(["search", "car", *settings(workspace)], NO_ENVIRONMENT) == 2
+
+
+def test_a_missing_ids_file_is_a_usage_error(workspace: Path) -> None:
+    missing = str(workspace / "missing_ids.txt")
+
+    assert main(["step", "--ids", missing, *settings(workspace)], NO_ENVIRONMENT) == 1
+
+
+def test_an_ids_file_with_a_line_that_is_not_an_id_is_a_usage_error(workspace: Path) -> None:
+    (workspace / "ids.txt").write_text("1\nabc\n3\n", encoding="utf-8", newline="")
+
+    assert main(["run", "--steps", "2", "--ids", str(workspace / "ids.txt"), *settings(workspace)], NO_ENVIRONMENT) == 1
+    assert not (workspace / "data" / "control" / "downloaded_books.txt").exists()

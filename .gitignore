@@ -11,6 +11,7 @@ mongo-data/
 *.db-shm
 *.tmp
 .lock
+*.pdf
 
 CLAUDE.md
 CLAUDE.local.md

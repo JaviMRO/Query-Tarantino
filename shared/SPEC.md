@@ -1,7 +1,7 @@
 # SPEC · Shared rules for Stage 1
 
 **Project:** Query Tarantino · Big Data, ULPGC
-**Version:** 1.5 · 2026-09-29
+**Version:** 1.7 · 2026-09-30
 **Scope:** the three Stage 1 modules (`Query_Tarantino_Java`, `Query_Tarantino_Python`, `Query_Tarantino_Cpp`), the shared repository layout (section 15) and, from phase 2 onwards, the Java version.
 
 This document defines **what** each module must do, precisely enough for all three to produce exactly the same results. It does not say **how** to implement it: each language uses its own tools as long as it follows these rules.
@@ -491,11 +491,11 @@ The books of a configuration with `n_books = N` are the first N IDs of `shared/b
 tarantino bench --experiment E --structure S --n N --run R --out FILE.csv
 ```
 
-- **Bench area.** `bench` works only inside `<TARANTINO_DATA_DIR>/bench/`, which it empties right after acquiring the lock (section 13.1). It never touches anything else in the data folder, so a benchmark can never destroy real pipeline data. The lock is still `<TARANTINO_DATA_DIR>/control/.lock`.
+- **Bench area.** `bench` works only inside `<TARANTINO_DATA_DIR>/bench/`, which it empties right after acquiring the lock (section 13.1). It never touches anything else in the data folder, so a benchmark can never destroy real pipeline data. The only exceptions are the lock, which is still `<TARANTINO_DATA_DIR>/control/.lock`, and the `.tmp` cleanup that every writing command runs right after acquiring it (sections 4.3 and 13.1): it only deletes leftovers of interrupted writes, which are never data.
 - Inside the bench area, paths are those of sections 4, 5, 7 and 8, as if it were a data folder of its own: for example `bench/datalake_book/7/body.txt` or `bench/control/downloaded_books.txt`. When the `recovery` experiment runs the `.tmp` cleanup of section 4.3, it runs it over the same folders inside the bench area.
 - **Downloader.** Every experiment except `download` reads books with `LocalCorpusDownloader` from `TARANTINO_CORPUS_DIR`, which must contain the whole benchmark corpus (the 1,000 books). `download` uses `HttpBookDownloader`.
 - `--structure` selects the structure. The `--lake`, `--index` and `--downloader` settings are ignored by `bench`.
-- **MongoDB.** Database `query_tarantino_bench`, never `query_tarantino`. It is dropped at the start of every run.
+- **MongoDB.** Database `query_tarantino_bench`, never `query_tarantino`. It is dropped at the start of every `index` run with `mongo`, the only runs that use it (section 11.5.3). The other runs never connect to MongoDB, so they do not need the server.
 - **Output.** A run appends its rows to `--out` (writing the header of section 11.8 only if the file does not exist yet), and only after all its validity checks have passed (section 11.7). If a check fails, the run writes no rows and exits with code `2`.
 
 ### 11.3 Measurement rules
@@ -1060,3 +1060,5 @@ The README is updated in the same pull request that changes any of these points.
 | 1.3 | 2026-09-28 | 3.2: politeness measured between request starts; any network error counts as a failed URL; redirects must be enabled where the client does not follow them. 4.3 and 13.1: `.tmp` leftovers deleted right after acquiring the lock; a command that cannot acquire the lock never deletes it. 4.1: rule for old copies of a book in the `time` datalake. 5.4: index on `title`. 7.1: book IDs converted to strings before sorting, with per-language notes. 9.3: `N` read from SQLite. 10: `bench` arguments. 11: benchmark methodology rewritten: experiments and configurations, bench area, measurement rules, simulated clock, exact definition of every metric, new `recovery` and `baseline` experiments, `metadata` experiment up to 50,000 rows, `run_all.sh` environment and order, validity checks, CSV format and analysis. 12: corpus folder and example command. 13.3: no forced flushes. 14.6 to 14.9: new cases. 15: repository and delivery requirements from the guide |
 | 1.4 | 2026-09-29 | 1.1: selection tool, 2-second wait between requests following Project Gutenberg's robot policy, resumable order of writes. 1.2: exact query generation rules (index, bands with integer limits, slot-to-band assignment, alphabetical candidates, sampling without replacement with seed 42, query format) |
 | 1.5 | 2026-09-29 | 3.2, 11.5.5 and 1.1: the `download` benchmark waits 2 seconds between requests, like the corpus selection. 9.4, 12 and 13.2: displayed scores compared with a tolerance of `1e-6 + 1e-9`; residual risk of a tie on a rounding boundary stated. 15: the size of a commit does not matter as long as its message explains every change |
+| 1.6 | 2026-09-30 | 11.2: `query_tarantino_bench` is dropped at the start of every `index` run with `mongo`, the only runs that use it; the other runs never connect to MongoDB |
+| 1.7 | 2026-09-30 | 11.2: the `.tmp` cleanup of sections 4.3 and 13.1, which `bench` runs like every writing command, is stated as the only exception, besides the lock, to the rule that `bench` touches nothing outside its bench area |

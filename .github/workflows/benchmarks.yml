@@ -1,0 +1,47 @@
+name: Benchmarks
+
+on:
+  push:
+    paths:
+      - "benchmarks/**"
+      - ".github/workflows/benchmarks.yml"
+  pull_request:
+    paths:
+      - "benchmarks/**"
+      - ".github/workflows/benchmarks.yml"
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: benchmarks
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: benchmarks/requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Format
+        run: ruff format --check .
+
+      - name: Types
+        run: mypy .
+
+      - name: Shell scripts
+        run: |
+          for script in run_all.sh equivalence_check.sh scripts/*.sh; do bash -n "$script"; done
+          shellcheck -x --severity=style run_all.sh equivalence_check.sh scripts/run_with_peak_rss.sh
+          shellcheck --severity=style -e SC2034 scripts/languages.sh
+
+      - name: Tests
+        run: pytest -rs

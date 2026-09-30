@@ -52,14 +52,16 @@ class TimeBasedAdapter:
 
 
 def hour_folder_of(paths: StoredPaths) -> str:
-    """The YYYYMMDD/HH folder of a book stored in the time lake, taken from its paths."""
+    """
+    The YYYYMMDD/HH folder of a book stored in the time lake, taken from its paths. Used only by the bench command.
+    """
     return paths.header.removeprefix(f"{TIME_LAKE_FOLDER}/").rsplit("/", 1)[0]
 
 
 def stored_time_book_ids(data_dir: Path, checkpoint: str) -> set[int]:
     """
     Ids of the complete books in the hour folders whose YYYYMMDD/HH is greater than or equal, as text, to the
-    checkpoint; an empty checkpoint lists the whole lake (SPEC 11.5.1 detect_new_scan).
+    checkpoint; an empty checkpoint lists the whole lake (SPEC 11.5.1 detect_new_scan). Used only by the bench command.
     """
     lake_dir = data_dir / TIME_LAKE_FOLDER
     recent_folders = [folder for folder in _hour_folders_newest_first(lake_dir) if folder >= checkpoint]
@@ -67,7 +69,10 @@ def stored_time_book_ids(data_dir: Path, checkpoint: str) -> set[int]:
 
 
 def count_stale_copies(data_dir: Path) -> int:
-    """Number of books with a complete copy in more than one hour folder (SPEC 4.1, 11.5.2)."""
+    """
+    Number of books with a complete copy in more than one hour folder (SPEC 4.1, 11.5.2). Used only by the bench
+    command.
+    """
     lake_dir = data_dir / TIME_LAKE_FOLDER
     copies = Counter(_complete_copies(lake_dir, list(_hour_folders_newest_first(lake_dir))))
     return sum(1 for count in copies.values() if count > 1)

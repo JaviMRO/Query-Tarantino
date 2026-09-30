@@ -10,7 +10,7 @@ from pymongo.collection import Collection
 
 from src.domain.ports import PostingsReader
 from src.domain.search import SearchHit, query_terms, rank_books
-from src.infrastructure.entrypoints.bench.bench_area import BENCH_DATABASE, BenchContext, check
+from src.infrastructure.entrypoints.bench.bench_area import BenchContext, MongoTarget, check
 from src.infrastructure.entrypoints.bench.measurement.timing import (
     Measurement,
     NanoClock,
@@ -48,12 +48,14 @@ class _Queries:
     stopwords: frozenset[str]
 
 
-def open_index(context: BenchContext, layout: IndexLayout, mongo_url: str, resources: ExitStack) -> Timed[OpenedIndex]:
+def open_index(
+    context: BenchContext, layout: IndexLayout, mongo: MongoTarget, resources: ExitStack
+) -> Timed[OpenedIndex]:
     """
     SQLite opened and N read; json also parses the whole file and mongo also creates a client and pings the
     server; folders does nothing else (SPEC 11.5.3 step 5).
     """
-    return timed(context.clock, partial(_open, context.bench_dir, layout, mongo_url, resources))
+    return timed(context.clock, partial(_open, context.bench_dir, layout, mongo, resources))
 
 
 def query_measurements(
@@ -72,16 +74,16 @@ def query_measurements(
     ]
 
 
-def _open(data_dir: Path, layout: IndexLayout, mongo_url: str, resources: ExitStack) -> OpenedIndex:
+def _open(data_dir: Path, layout: IndexLayout, mongo: MongoTarget, resources: ExitStack) -> OpenedIndex:
     connection = open_metadata_database(metadata_database_path(data_dir), resources)
-    reader = build_postings_reader(layout, data_dir, partial(_pinged_bench_postings, mongo_url, resources))
+    reader = build_postings_reader(layout, data_dir, partial(_pinged_bench_postings, mongo, resources))
     return OpenedIndex(reader, SqliteBookCatalog(connection).count_indexed_books())
 
 
-def _pinged_bench_postings(mongo_url: str, resources: ExitStack) -> Collection[PostingDocument]:
-    client = open_mongo_client(mongo_url, resources)
+def _pinged_bench_postings(mongo: MongoTarget, resources: ExitStack) -> Collection[PostingDocument]:
+    client = open_mongo_client(mongo.url, resources)
     client.admin.command("ping")
-    return client[BENCH_DATABASE][POSTINGS_COLLECTION]
+    return client[mongo.database][POSTINGS_COLLECTION]
 
 
 def _timed_pass(clock: NanoClock, opened: OpenedIndex, batch: _Queries) -> list[Timed[list[SearchHit]]]:

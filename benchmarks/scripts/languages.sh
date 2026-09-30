@@ -4,7 +4,16 @@ export LC_ALL=C
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BENCHMARKS_DIR="${ROOT_DIR}/benchmarks"
-SHARED_DIR="${TARANTINO_SHARED_DIR:-${ROOT_DIR}/shared}"
+
+absolute_path() {
+    (cd "$1" 2> /dev/null && pwd) || echo "$1"
+}
+
+SHARED_DIR="$(absolute_path "${TARANTINO_SHARED_DIR:-${ROOT_DIR}/shared}")"
+if [[ -n "${TARANTINO_CORPUS_DIR:-}" ]]; then
+    TARANTINO_CORPUS_DIR="$(absolute_path "${TARANTINO_CORPUS_DIR}")"
+    export TARANTINO_CORPUS_DIR
+fi
 BOOK_IDS_FILE="${SHARED_DIR}/book_ids_benchmark.txt"
 QUERIES_FILE="${SHARED_DIR}/queries.txt"
 

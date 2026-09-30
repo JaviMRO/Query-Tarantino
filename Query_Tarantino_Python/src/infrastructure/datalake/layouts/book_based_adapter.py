@@ -32,7 +32,10 @@ class BookBasedAdapter:
 
 
 def stored_book_book_ids(data_dir: Path) -> set[int]:
-    """Ids of every complete book in the book lake, found by listing it (SPEC 11.5.1 detect_new_scan)."""
+    """
+    Ids of every complete book in the book lake, found by listing it (SPEC 11.5.1 detect_new_scan). Used only by the
+    bench command.
+    """
     lake_dir = data_dir / BOOK_LAKE_FOLDER
     if not lake_dir.is_dir():
         return set()

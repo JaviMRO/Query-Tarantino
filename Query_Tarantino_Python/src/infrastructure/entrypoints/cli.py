@@ -89,10 +89,10 @@ def _build_parser() -> argparse.ArgumentParser:
     subcommands = parser.add_subparsers(dest="command", required=True)
     for name in ("download", "index"):
         subcommands.add_parser(name, parents=[settings_options]).add_argument("book_id", type=_positive_int)
-    subcommands.add_parser("step", parents=[settings_options]).add_argument("--ids", type=Path)
+    subcommands.add_parser("step", parents=[settings_options]).add_argument("--ids", type=_ids_file)
     run = subcommands.add_parser("run", parents=[settings_options])
     run.add_argument("--steps", type=_positive_int, required=True)
-    run.add_argument("--ids", type=Path)
+    run.add_argument("--ids", type=_ids_file)
     search = subcommands.add_parser("search", parents=[settings_options])
     search.add_argument("text")
     search.add_argument("--json", dest="as_json", action="store_true")
@@ -115,6 +115,29 @@ def _settings_options() -> argparse.ArgumentParser:
     for name in SETTING_NAMES:
         options.add_argument(option_flag(name), dest=name, default=argparse.SUPPRESS)
     return options
+
+
+def _ids_file(text: str) -> Path:
+    """An existing --ids file with one book id per line (SPEC 8.1); anything else is a usage error (SPEC 10)."""
+    path = Path(text)
+    try:
+        invalid_line = _first_invalid_id_line(path)
+    except OSError as error:
+        raise argparse.ArgumentTypeError(f"cannot read {text}: {error.strerror}") from error
+    if invalid_line is not None:
+        raise argparse.ArgumentTypeError(f"line {invalid_line} of {text} is not a book id")
+    return path
+
+
+def _first_invalid_id_line(path: Path) -> int | None:
+    """Checked once, line by line; the steps still read the file lazily."""
+    with path.open(encoding="utf-8", newline="") as file:
+        return next((number for number, line in enumerate(file, start=1) if not _is_id_line(line)), None)
+
+
+def _is_id_line(line: str) -> bool:
+    content = line.rstrip("\n")
+    return not content or (content.isascii() and content.isdecimal())
 
 
 def _positive_int(text: str) -> int:

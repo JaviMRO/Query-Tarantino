@@ -23,7 +23,10 @@ def folder_index_dir(data_dir: Path) -> Path:
 
 
 def count_folder_index(data_dir: Path) -> IndexCounts:
-    """One term per file; the distinct books of each file are its postings, the last line counting (SPEC 7.3)."""
+    """
+    One term per file; the distinct books of each file are its postings, the last line counting (SPEC 7.3). Used only by
+    the bench command.
+    """
     term_files = list(folder_index_dir(data_dir).glob(f"*/*{_TERM_FILE_SUFFIX}"))
     return IndexCounts(len(term_files), sum(len(_read_term_file(path)) for path in term_files))
 

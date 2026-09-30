@@ -67,7 +67,10 @@ class MongoPostingsReader:
 
 
 def count_mongo_index(collection: Collection[PostingDocument]) -> IndexCounts:
-    """Distinct terms, grouped by the server, and documents, one per term-book pair (SPEC 7.2, 11.5.3 step 4)."""
+    """
+    Distinct terms, grouped by the server, and documents, one per term-book pair (SPEC 7.2, 11.5.3 step 4). Used only by
+    the bench command.
+    """
     reply = collection.database.command("aggregate", collection.name, pipeline=_COUNT_TERMS_PIPELINE, cursor={})
     first_batch = reply["cursor"]["firstBatch"]
     terms = int(first_batch[0][_TERMS_FIELD]) if first_batch else 0
@@ -76,8 +79,8 @@ def count_mongo_index(collection: Collection[PostingDocument]) -> IndexCounts:
 
 def mongo_disk_bytes(client: MongoClient[PostingDocument], collection: Collection[PostingDocument]) -> int:
     """
-    storageSize + totalIndexSize of the collection, after the fsync admin command so that the data has reached
-    the disk; the size is compressed by MongoDB (SPEC 11.5.3 step 3).
+    storageSize + totalIndexSize of the collection, after the fsync admin command so that the data has reached the disk;
+    the size is compressed by MongoDB (SPEC 11.5.3 step 3). Used only by the bench command.
     """
     client.admin.command("fsync")
     reply = collection.database.command("aggregate", collection.name, pipeline=_STORAGE_STATS_PIPELINE, cursor={})

@@ -17,6 +17,7 @@ import requests
 from src.application.corpus.build_benchmark_corpus_use_case import BuildBenchmarkCorpusUseCase
 from src.application.corpus.generate_queries_use_case import QUERY_SEED, GenerateQueriesUseCase
 from src.infrastructure.corpus.file_corpus_store import (
+    BENCHMARK_BOOK_COUNT,
     BENCHMARK_IDS_FILE,
     QUERIES_FILE,
     SAMPLE_DATASET_FOLDER,
@@ -36,7 +37,6 @@ from src.infrastructure.index.monolithic_json_adapter import JsonPostingsReader
 from src.infrastructure.metadata.sqlite_metadata_adapter import SqliteBookCatalog
 
 PROGRAM_NAME = "corpus_tools"
-BENCHMARK_BOOK_COUNT = 1000
 
 
 def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:

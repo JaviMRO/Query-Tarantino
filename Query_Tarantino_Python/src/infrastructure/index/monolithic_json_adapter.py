@@ -69,7 +69,7 @@ class JsonPostingsReader:
 
 
 def count_json_index(data_dir: Path) -> IndexCounts:
-    """Distinct terms and term-book pairs of the whole file (SPEC 11.5.3 step 4)."""
+    """Distinct terms and term-book pairs of the whole file (SPEC 11.5.3 step 4). Used only by the bench command."""
     index = _read_index(json_index_path(data_dir))
     return IndexCounts(len(index), sum(len(postings) for postings in index.values()))
 

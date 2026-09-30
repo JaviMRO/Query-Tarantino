@@ -10,7 +10,7 @@ from src.infrastructure.entrypoints.bench.measurement.timing import (
     sample_positions,
     simulated_clock,
     timed,
-    warm_mean_ms,
+    warm_mean,
 )
 from tests.infrastructure.entrypoints.bench.conftest import millisecond_clock
 
@@ -52,10 +52,18 @@ def test_timed_returns_the_result_and_the_time_between_two_clock_reads() -> None
 def test_warm_mean_runs_a_warm_up_pass_and_divides_the_measured_region_by_the_operations() -> None:
     passes: list[int] = []
 
-    mean_ms = warm_mean_ms(millisecond_clock(), lambda: passes.append(1), 20, 1000)
+    measured = warm_mean(millisecond_clock(), lambda: passes.append(1), 20, 1000)
 
     assert len(passes) == 21
-    assert mean_ms == 0.001
+    assert measured.mean_ms == 0.001
+
+
+def test_warm_mean_keeps_what_each_measured_pass_returned_but_not_the_warm_up() -> None:
+    calls = iter(range(10))
+
+    measured = warm_mean(millisecond_clock(), lambda: next(calls), 3, 3)
+
+    assert measured.results == [1, 2, 3]
 
 
 def test_times_and_throughputs_use_milliseconds_and_seconds() -> None:

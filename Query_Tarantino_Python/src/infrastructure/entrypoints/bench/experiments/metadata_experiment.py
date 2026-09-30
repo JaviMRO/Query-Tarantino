@@ -27,7 +27,7 @@ from src.infrastructure.entrypoints.bench.measurement.timing import (
     per_second,
     sample_positions,
     timed,
-    warm_mean_ms,
+    warm_mean,
 )
 from src.infrastructure.entrypoints.wiring.composition import open_metadata_database
 from src.infrastructure.metadata.sqlite_metadata_adapter import SqliteMetadataAdapter
@@ -158,9 +158,9 @@ def _lookup_mean(
     """A warm-up pass, then 20 passes over the 50 sample rows timed as one region (step 6)."""
     values = [lookup.key(book) for book in sample]
     lookup_pass = partial(_count_answered, connection, lookup.statement, values)
-    mean_ms = warm_mean_ms(context.clock, lookup_pass, LOOKUP_PASSES, LOOKUP_PASSES * len(values))
-    check(lookup_pass() == len(values), f"a {lookup.metric} lookup returned no rows")
-    return Measurement(lookup.metric, mean_ms, Unit.MS)
+    measured = warm_mean(context.clock, lookup_pass, LOOKUP_PASSES, LOOKUP_PASSES * len(values))
+    check(all(answered == len(values) for answered in measured.results), f"a {lookup.metric} lookup returned no rows")
+    return Measurement(lookup.metric, measured.mean_ms, Unit.MS)
 
 
 def _count_answered(connection: sqlite3.Connection, statement: str, values: list[SqlValue]) -> int:

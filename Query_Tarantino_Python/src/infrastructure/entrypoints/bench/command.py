@@ -10,16 +10,18 @@ from pathlib import Path
 
 import requests
 
-from src.infrastructure.corpus.file_corpus_store import BENCHMARK_IDS_FILE, FileCorpusStore
+from src.infrastructure.corpus.file_corpus_store import BENCHMARK_BOOK_COUNT, BENCHMARK_IDS_FILE, FileCorpusStore
 from src.infrastructure.downloader.gutenberg_http_downloader import (
     AUTOMATED_CLIENT_SECONDS_BETWEEN_REQUESTS,
     GUTENBERG_BASE_URL,
     GutenbergHttpDownloader,
 )
 from src.infrastructure.entrypoints.bench.bench_area import (
+    BENCH_DATABASE,
     BENCH_FOLDER,
     BenchContext,
     BenchValidityError,
+    MongoTarget,
     check,
     reset_bench_area,
 )
@@ -44,11 +46,18 @@ def bench(settings: Settings, configuration: Configuration, out: Path) -> int:
         print(f"tarantino bench: invalid run, no rows written: {error}", file=sys.stderr)
         return EXIT_RUNTIME_ERROR
     append_measurements(out, configuration, measurements)
-    print(
-        f"{configuration.experiment.value} {configuration.structure} n={configuration.n_books} "
-        f"run={configuration.run}: {len(measurements)} rows appended to {out}"
-    )
+    print(_outcome(configuration, len(measurements), out))
     return EXIT_OK
+
+
+def _outcome(configuration: Configuration, rows: int, out: Path) -> str:
+    """What the run wrote; baseline writes no rows, run_all.sh only records its peak_rss (SPEC 11.5.6)."""
+    name = (
+        f"{configuration.experiment.value} {configuration.structure} n={configuration.n_books} run={configuration.run}"
+    )
+    if rows == 0:
+        return f"{name}: no rows written, as expected"
+    return f"{name}: {rows} rows appended to {out}"
 
 
 def _context(settings: Settings, configuration: Configuration) -> BenchContext:
@@ -61,9 +70,13 @@ def _context(settings: Settings, configuration: Configuration) -> BenchContext:
 
 
 def _books_of(settings: Settings, configuration: Configuration) -> tuple[int, ...]:
-    """The whole list for metadata, whose n_books counts rows; the first N ids otherwise (SPEC 11.1, 11.5.4)."""
+    """
+    The whole list of 1,000 books for metadata, whose n_books counts rows; the first N ids otherwise (SPEC 11.1,
+    11.5.4).
+    """
     listed = FileCorpusStore(settings.corpus_dir, settings.shared_dir / BENCHMARK_IDS_FILE).get_selected_books()
     if configuration.experiment is Experiment.METADATA:
+        check(len(listed) == BENCHMARK_BOOK_COUNT, f"{BENCHMARK_IDS_FILE} lists {len(listed)} books, not 1000")
         return tuple(listed)
     check(len(listed) >= configuration.n_books, f"{BENCHMARK_IDS_FILE} lists only {len(listed)} books")
     return tuple(listed[: configuration.n_books])
@@ -77,7 +90,8 @@ def _run(settings: Settings, configuration: Configuration, context: BenchContext
             return run_recovery(context, LakeLayout(configuration.structure))
         case Experiment.INDEX:
             stopwords = load_stopwords(settings.shared_dir)
-            return run_index(context, IndexLayout(configuration.structure), stopwords, settings.mongo_url)
+            mongo = MongoTarget(settings.mongo_url, BENCH_DATABASE)
+            return run_index(context, IndexLayout(configuration.structure), stopwords, mongo)
         case Experiment.METADATA:
             return run_metadata(context, configuration.n_books)
         case Experiment.DOWNLOAD:

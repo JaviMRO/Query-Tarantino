@@ -41,10 +41,18 @@ def test_a_list_shorter_than_n_is_an_invalid_run_without_rows(workspace: Workspa
     assert not out.exists()
 
 
-def test_baseline_writes_no_rows(workspace: Workspace, tmp_path: Path) -> None:
+def test_baseline_writes_no_rows(workspace: Workspace, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     out = tmp_path / "python_baseline.csv"
 
     assert bench(workspace, out, "baseline", "none", 0) == 0
+    assert not out.exists()
+    assert "no rows written" in capsys.readouterr().out
+
+
+def test_metadata_needs_the_whole_list_of_1000_books(workspace: Workspace, tmp_path: Path) -> None:
+    out = tmp_path / "python_metadata.csv"
+
+    assert bench(workspace, out, "metadata", "sqlite", 1000) == 2
     assert not out.exists()
 
 

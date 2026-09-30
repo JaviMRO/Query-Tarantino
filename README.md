@@ -17,7 +17,9 @@ stage_1/
 
 - **MongoDB** (only for `--index mongo`): a server reachable at `TARANTINO_MONGO_URL`
   (default `mongodb://localhost:27017`), for example `docker run -d -p 27017:27017 mongo`.
-- **Python:** CPython 3.10 or later. Details in [`Query_Tarantino_Python/README.md`](Query_Tarantino_Python/README.md).
+- **Python:** CPython 3.10 or later for the pipeline; the benchmarks run with **CPython 3.12**, and `run_all.sh`
+  records the exact version and every installed package in `benchmarks/results/environment.txt`. Details in
+  [`Query_Tarantino_Python/README.md`](Query_Tarantino_Python/README.md).
 - **Java** and **C++:** see the README of each module.
 
 ## Build and install
@@ -117,7 +119,7 @@ configuration of SPEC 11.1 inside `<TARANTINO_DATA_DIR>/bench/` (emptied at the 
 the data folder is touched) and appends its rows to `FILE.csv` only if every validity check passed (exit code `2`
 otherwise). Every experiment except `download` reads the books with the local downloader, so `TARANTINO_CORPUS_DIR`
 must hold the whole corpus; `download` requests Gutenberg with 2 seconds between requests. MongoDB runs use the
-database `query_tarantino_bench`, never `query_tarantino`.
+database `query_tarantino_bench`, never `query_tarantino`; only `index` runs with `mongo` connect to it, and they drop it first (SPEC 11.2).
 
 The whole campaign, on one Linux machine (native or WSL2, with GNU `time` and GNU `du`) and with MongoDB running:
 
@@ -141,3 +143,19 @@ benchmarks/run_all.sh 6 10 benchmarks/report/rerun_configurations.txt   # 5 extr
 
 `BENCH_LANGUAGES` (default `python java cpp`) limits the languages, for example to try the scripts while a module
 does not have `bench` yet; results measured that way are not a valid comparison.
+
+Checks of the benchmark scripts themselves, with CPython 3.12 (the same rules as the modules; they also run in CI
+on every change to `benchmarks/`):
+
+```bash
+cd benchmarks
+python3.12 -m venv .venv && source .venv/bin/activate && pip install -r requirements-dev.txt
+ruff check . && ruff format --check .
+mypy .
+python -m pytest
+shellcheck -x --severity=style run_all.sh equivalence_check.sh scripts/run_with_peak_rss.sh
+shellcheck --severity=style -e SC2034 scripts/languages.sh   # its variables are used by the scripts that source it
+```
+
+`shellcheck` is preinstalled on the CI runners; locally it can be installed with `brew install shellcheck` or
+`pip install shellcheck-py`.

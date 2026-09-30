@@ -41,7 +41,16 @@ check_prerequisites() {
 }
 
 version_of() {
-    "$@" 2>&1 | head -n 1 || echo "unavailable"
+    if ! command -v "$1" > /dev/null 2>&1; then
+        echo "unavailable"
+        return
+    fi
+    "$@" 2>&1 | head -n 1
+}
+
+mongodb_server_version() {
+    python -c 'import sys; from pymongo import MongoClient; print(MongoClient(sys.argv[1], serverSelectionTimeoutMS=2000).server_info()["version"])' \
+        "${TARANTINO_MONGO_URL:-mongodb://localhost:27017}" 2> /dev/null || echo "unavailable"
 }
 
 write_environment() {
@@ -57,7 +66,8 @@ write_environment() {
         echo "java: $(version_of java -version)"
         echo "cxx: $(version_of c++ --version)"
         echo "cmake: $(version_of cmake --version)"
-        echo "mongodb: $(version_of mongod --version)"
+        echo "mongodb_server: $(mongodb_server_version)"
+        echo "python_packages: $(python -m pip freeze 2> /dev/null | tr '\n' ' ')"
         echo "commit: $(git -C "${ROOT_DIR}" rev-parse HEAD)"
         echo "uncommitted_changes: $([[ -n "$(git -C "${ROOT_DIR}" status --porcelain)" ]] && echo yes || echo no)"
     } > "${RESULTS_DIR}/environment.txt"
@@ -84,15 +94,15 @@ allocated_path() {
 record_external_measurements() {
     local language="$1" experiment="$2" structure="$3" n_books="$4" round="$5" peak_bytes="$6"
     local out="${RESULTS_DIR}/${language}_${experiment}.csv"
-    local prefix="${language},${experiment},${structure},${n_books}"
-    append_csv_row "${out}" "${CSV_HEADER}" "${prefix},peak_rss,$(printf '%.6f' "${peak_bytes}"),bytes,${round}"
+    local row_prefix="${language},${experiment},${structure},${n_books}"
+    append_csv_row "${out}" "${CSV_HEADER}" "${row_prefix},peak_rss,$(printf '%.6f' "${peak_bytes}"),bytes,${round}"
     local allocated
     allocated="$(allocated_path "${experiment}" "${structure}")"
     if [[ -n "${allocated}" ]]; then
         local allocated_bytes
         allocated_bytes="$(du -sB1 "${allocated}" | cut -f1)"
         append_csv_row "${out}" "${CSV_HEADER}" \
-            "${prefix},disk_bytes_allocated,$(printf '%.6f' "${allocated_bytes}"),bytes,${round}"
+            "${row_prefix},disk_bytes_allocated,$(printf '%.6f' "${allocated_bytes}"),bytes,${round}"
     fi
     if [[ "${experiment}:${structure}" == "index:json" ]]; then
         local sha
@@ -109,7 +119,7 @@ run_configuration() {
     run_tarantino "${language}" env TARANTINO_DATA_DIR="${WORK_DIR}" TARANTINO_SHARED_DIR="${SHARED_DIR}" \
         "${BENCHMARKS_DIR}/scripts/run_with_peak_rss.sh" "${peak_file}" \
         -- bench --experiment "${experiment}" --structure "${structure}" --n "${n_books}" --run "${round}" \
-        --out "${RESULTS_DIR}/${language}_${experiment}.csv" \
+        --out "${RESULTS_DIR}/${language}_${experiment}.csv" < /dev/null \
         || die "invalid run: ${language} ${experiment} ${structure} ${n_books} round ${round}"
     record_external_measurements "${language}" "${experiment}" "${structure}" "${n_books}" "${round}" \
         "$(cat "${peak_file}")"
@@ -123,12 +133,13 @@ is_selected() {
 }
 
 run_round() {
-    local round="$1" language experiment structure n_books
+    local round="$1" plan language experiment structure n_books
+    plan="$(python3 "${BENCHMARKS_DIR}/plan.py" --round "${round}")"
     while read -r language experiment structure n_books; do
         if is_selected "${language}" "${language} ${experiment} ${structure} ${n_books}"; then
             run_configuration "${language}" "${experiment}" "${structure}" "${n_books}" "${round}"
         fi
-    done < <(python3 "${BENCHMARKS_DIR}/plan.py" --round "${round}")
+    done <<< "${plan}"
 }
 
 main() {

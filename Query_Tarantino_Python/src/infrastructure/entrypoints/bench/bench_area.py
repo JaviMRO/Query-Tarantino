@@ -17,6 +17,14 @@ BENCH_DATABASE = "query_tarantino_bench"
 NEW_BOOKS = 50
 
 
+@dataclass(frozen=True, slots=True)
+class MongoTarget:
+    """The server and the database the bench writes to: query_tarantino_bench in every measured run (SPEC 11.2)."""
+
+    url: str
+    database: str
+
+
 class BenchValidityError(Exception):
     """A validity check failed: the run writes no rows and exits with code 2 (SPEC 11.7)."""
 
@@ -33,8 +41,9 @@ class BenchContext:
 
 
 def reset_bench_area(bench_dir: Path) -> None:
-    """Empties the bench area; nothing outside it is ever touched (SPEC 11.2)."""
-    shutil.rmtree(bench_dir, ignore_errors=True)
+    """Empties the bench area; nothing outside it is ever touched (SPEC 11.2). A failed deletion is raised."""
+    if bench_dir.exists():
+        shutil.rmtree(bench_dir)
     bench_dir.mkdir(parents=True)
 
 

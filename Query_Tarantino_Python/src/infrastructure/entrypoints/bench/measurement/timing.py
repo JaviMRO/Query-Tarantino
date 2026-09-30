@@ -57,16 +57,26 @@ def timed(clock: NanoClock, operation: Callable[[], _Result]) -> Timed[_Result]:
     return Timed(result, clock() - start)
 
 
-def warm_mean_ms(clock: NanoClock, one_pass: Callable[[], object], passes: int, operations: int) -> float:
+@dataclass(frozen=True, slots=True)
+class WarmMean(Generic[_Result]):
+    """Mean time per operation of the measured passes, and what each measured pass returned."""
+
+    mean_ms: float
+    results: list[_Result]
+
+
+def warm_mean(clock: NanoClock, one_pass: Callable[[], _Result], passes: int, operations: int) -> WarmMean[_Result]:
     """
     One unmeasured warm-up pass, then `passes` passes timed as a single region; the total, in milliseconds,
-    divided by the number of operations (SPEC 11.3 rules 3 and 4).
+    divided by the number of operations (SPEC 11.3 rules 3 and 4). The results let the validity checks of
+    SPEC 11.7 look at the measured passes themselves.
     """
     one_pass()
+    results = []
     start = clock()
     for _ in range(passes):
-        one_pass()
-    return milliseconds(clock() - start) / operations
+        results.append(one_pass())
+    return WarmMean(milliseconds(clock() - start) / operations, results)
 
 
 def milliseconds(elapsed_ns: int) -> float:
